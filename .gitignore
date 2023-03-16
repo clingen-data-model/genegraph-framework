@@ -12,3 +12,18 @@ pom.xml.asc
 .lein-failures
 .nrepl-port
 .cpcache/
+
+# Temp Files
+*.orig
+*~
+.*.swp
+.*.swo
+*.tmp
+*.bak
+
+# OS X
+.DS_Store
+
+# Logging
+*.log
+/logs/
