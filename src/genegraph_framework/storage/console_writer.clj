@@ -21,6 +21,5 @@
 (defmethod p/init :console-writer [_]
   (->ConsoleWriter))
 
-(let [w (->ConsoleWriter)]
-  (p/effect {::p/storage w ::p/effect :write :value "hi there!"}))
+
 

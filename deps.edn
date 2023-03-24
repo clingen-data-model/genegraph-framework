@@ -11,5 +11,9 @@
  :deps
  {org.clojure/clojure {:mvn/version "1.11.1"}
   io.pedestal/pedestal.jetty                        {:mvn/version "0.5.10"}
-  io.pedestal/pedestal.service                      {:mvn/version "0.5.10"}}}
+  io.pedestal/pedestal.service                      {:mvn/version "0.5.10"}
+  org.rocksdb/rocksdbjni                            {:mvn/version "7.10.2"}
+  com.taoensso/nippy                                {:mvn/version "3.2.0"}
+  digest/digest                                     {:mvn/version "1.4.10"}
+  org.clojure/core.async                            {:mvn/version "1.6.673"}}}
 
