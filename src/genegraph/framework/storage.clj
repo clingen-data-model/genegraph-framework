@@ -1,4 +1,4 @@
-(ns genegraph-framework.storage
+(ns genegraph.framework.storage
   (:refer-clojure :exclude [read]))
 
 (defprotocol IndexedWrite

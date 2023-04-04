@@ -1,6 +1,6 @@
-(ns genegraph-framework.storage.rocksdb
-  (:require [genegraph-framework.protocol :as p]
-            [genegraph-framework.storage :as storage]
+(ns genegraph.framework.storage.rocksdb
+  (:require [genegraph.framework.protocol :as p]
+            [genegraph.framework.storage :as storage]
             [taoensso.nippy :as nippy]
             [clojure.java.io :as io]
             [digest])
@@ -208,9 +208,9 @@
   {:write
    (fn
      ([this k v]
-      (rocks-put! k v))
+      (rocks-put! this k v))
      ([this k v commit-promise]
-      (rocks-put! k v)
+      (rocks-put! this k v)
       (deliver commit-promise true)))}
 
   storage/IndexedRead

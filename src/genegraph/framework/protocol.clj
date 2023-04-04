@@ -1,4 +1,4 @@
-(ns genegraph-framework.protocol
+(ns genegraph.framework.protocol
   "Defines protocols and multimethods for entities in Genegraph")
 
 (defmulti init :type)

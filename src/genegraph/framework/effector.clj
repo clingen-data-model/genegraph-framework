@@ -1,2 +1,2 @@
-(ns genegraph-framework.effector
+(ns genegraph.framework.effector
   "Handles logic for initiating side-effects")

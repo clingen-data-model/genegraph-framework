@@ -1,7 +1,7 @@
-(ns genegraph-framework.processor
+(ns genegraph.framework.processor
   "Logic to handle processing over topics"
-  (:require [genegraph-framework.protocol :as p]
-            [genegraph-framework.storage :as s]
+  (:require [genegraph.framework.protocol :as p]
+            [genegraph.framework.storage :as s]
             [io.pedestal.interceptor :as interceptor]
             [io.pedestal.interceptor.chain :as interceptor-chain]
             [clojure.spec.alpha :as spec]))
@@ -25,10 +25,10 @@
                     (update-vals @(:storage processor)
                                  (fn [s] @(:instance s)))))
     :leave (fn [event]
-             (run! (fn [[scope storage effect & args]]
-                     (println scope effect storage args)
-                     (apply effect
-                            (get (::s/storage event) storage)
+             (run! (fn [{:keys [scope store command args commit-promise]}]
+                     (println scope command store args)
+                     (apply command
+                            (get (::s/storage event) store)
                             args))
                    (:effects event)))}))
 

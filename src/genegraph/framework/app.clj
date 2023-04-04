@@ -1,11 +1,11 @@
-(ns genegraph-framework.app
+(ns genegraph.framework.app
     "Core include refrerencing all necessary dependencies"
-    (:require [genegraph-framework.topic :as topic]
-              [genegraph-framework.processor :as processor]
-              [genegraph-framework.protocol :as p]
-              [genegraph-framework.storage :as s]
-              [genegraph-framework.storage.console-writer]
-              [genegraph-framework.storage.rocksdb]
+    (:require [genegraph.framework.topic :as topic]
+              [genegraph.framework.processor :as processor]
+              [genegraph.framework.protocol :as p]
+              [genegraph.framework.storage :as s]
+              [genegraph.framework.storage.console-writer]
+              [genegraph.framework.storage.rocksdb]
               [clojure.spec.alpha :as spec]))
 
 (spec/def ::app

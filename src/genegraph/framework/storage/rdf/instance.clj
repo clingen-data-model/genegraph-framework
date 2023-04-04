@@ -1,7 +1,7 @@
-(ns genegraph-framework.storage.rdf.instance
+(ns genegraph.framework.storage.rdf.instance
   "Namespace for handling operations on persistent Jena datasets.
   Specifically designed around handling asychronous writes. "
-  (:require [genegraph-framework.storage :as s])
+  (:require [genegraph.framework.storage :as s])
   (:import [org.apache.jena.tdb2 TDB2Factory]
            [org.apache.jena.query Dataset ReadWrite TxnType]
            [org.apache.jena.rdf.model Model Resource]

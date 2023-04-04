@@ -1,8 +1,8 @@
-(ns genegraph-framework.storage.rdf
+(ns genegraph.framework.storage.rdf
   "Storage processor for an RDF triplestore based on Apache Jena"
-  (:require [genegraph-framework.protocol :as p]
-            [genegraph-framework.storage.rdf.instance :as i]
-            [genegraph-framework.storage :as s])
+  (:require [genegraph.framework.protocol :as p]
+            [genegraph.framework.storage.rdf.instance :as i]
+            [genegraph.framework.storage :as s])
   (:import [org.apache.jena.rdf.model Model Resource ModelFactory]))
 
 (def instance-defaults

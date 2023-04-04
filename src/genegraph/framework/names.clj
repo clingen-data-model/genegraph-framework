@@ -1,7 +1,7 @@
-(ns genegraph-framework.names
+(ns genegraph.framework.names
   "A module for translating keywords to IRIs used
   in RDF."
-  (:require [genegraph-framework.protocol :as p]
+  (:require [genegraph.framework.protocol :as p]
             [clojure.edn :as edn]
             [clojure.set :as s]
             [clojure.java.io :as io]))
