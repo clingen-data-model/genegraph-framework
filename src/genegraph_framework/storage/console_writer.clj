@@ -5,17 +5,9 @@
 
 (defrecord ConsoleWriter []
     
-  p/StorageWrite
-  (write-record [this k v]
-    (pprint k)
-    (pprint v))
-
   p/Lifecycle
   (start [_])
-  (stop [_])
-
-  p/StorageWrite
-  (write [_ _ v] (pprint v)))
+  (stop [_]))
 
 
 (defmethod p/init :console-writer [_]

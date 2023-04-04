@@ -202,20 +202,40 @@
           (.close iter)
           (persistent! ret))))))
 
-
-
 (extend RocksDB
   
   storage/IndexedWrite
-  {:write rocks-put!}
+  {:write
+   (fn
+     ([this k v]
+      (rocks-put! k v))
+     ([this k v commit-promise]
+      (rocks-put! k v)
+      (deliver commit-promise true)))}
 
   storage/IndexedRead
-  {:get rocks-get})
+  {:read rocks-get}
+
+  ;; Consider sing other keys, or multipart keys if other storage facts
+  ;; needed. Also may need 
+  p/TopicBackingStore
+  {:store-offset
+   (fn [this topic offset]
+     (rocks-put! this topic offset))
+   :retrieve-offset
+   (fn [this topic]
+     (rocks-get this topic))})
 
 
 
 #_(with-open [db (open "/users/tristan/desktop/test-rocks")]
   (storage/write db :test :value))
+
+#_(with-open [db (open "/users/tristan/desktop/test-rocks")]
+  (p/store-offset db :test123 123 ))
+
+#_(with-open [db (open "/users/tristan/desktop/test-rocks")]
+  (p/retrieve-offset db :test123))
 
 #_(with-open [db (open "/users/tristan/desktop/test-rocks")]
   (storage/get db :test))

@@ -11,5 +11,7 @@
   (poll [this])
   (offer [this x]))
 
-(defprotocol StorageWrite
-  (write [this k v]))
+(defprotocol TopicBackingStore
+  (store-offset [this topic offset])
+  (retrieve-offset [this topic]))
+

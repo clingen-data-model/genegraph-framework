@@ -22,13 +22,19 @@
     :enter (fn [event]
              (assoc event
                     ::s/storage
-                    (reduce #(assoc %1 (:name %2) @(:instance %2))
-                            {}
-                            @(:storage processor))))}))
+                    (update-vals @(:storage processor)
+                                 (fn [s] @(:instance s)))))
+    :leave (fn [event]
+             (run! (fn [[scope storage effect & args]]
+                     (println scope effect storage args)
+                     (apply effect
+                            (get (::s/storage event) storage)
+                            args))
+                   (:effects event)))}))
 
 (defn get-subscribed-topic
   [processor]
-  (first (filter #(= (:subscribe processor) (:name %)) @(:topics processor))))
+  (get @(:topics processor) (:subscribe processor)))
 
 (comment
   (interceptor-chain/execute

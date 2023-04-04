@@ -1,14 +1,14 @@
 (ns genegraph-framework.storage
-  (:refer-clojure :exclude [get]))
+  (:refer-clojure :exclude [read]))
 
 (defprotocol IndexedWrite
-  (write [this k v]))
+  (write [this k v] [this k v commit-promise]))
 
 (defprotocol IndexedRead
-  (get [this k]))
+  (read [this k]))
 
 (defprotocol IndexedDelete
-  (delete [this k]))
+  (delete [this k] [this k commit-promise]))
 
 (defprotocol RangeRead
   (scan [this prefix] [this begin end]))

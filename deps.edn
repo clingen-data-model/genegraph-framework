@@ -15,5 +15,13 @@
   org.rocksdb/rocksdbjni                            {:mvn/version "7.10.2"}
   com.taoensso/nippy                                {:mvn/version "3.2.0"}
   digest/digest                                     {:mvn/version "1.4.10"}
-  org.clojure/core.async                            {:mvn/version "1.6.673"}}}
+  org.apache.kafka/kafka-clients                    {:mvn/version "3.4.0"}
+  org.clojure/core.async                            {:mvn/version "1.6.673"}
+  org.apache.jena/jena-arq                          {:mvn/version "4.7.0"}
+  org.apache.jena/jena-core                         {:mvn/version "4.7.0"}
+  org.apache.jena/jena-iri                          {:mvn/version "4.7.0"}
+  org.apache.jena/jena-tdb                          {:mvn/version "4.7.0"}
+  org.apache.jena/jena-tdb2                         {:mvn/version "4.7.0"}
+  org.apache.jena/jena-text                         {:mvn/version "4.7.0"}
+  org.apache.jena/jena-shacl                        {:mvn/version "4.7.0"}}}
 
