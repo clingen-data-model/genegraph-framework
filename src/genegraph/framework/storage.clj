@@ -10,6 +10,10 @@
 (defprotocol IndexedDelete
   (delete [this k] [this k commit-promise]))
 
+(defprotocol Transactional
+  (begin [this])
+  (end [this]))
+
 (defprotocol RangeRead
   (scan [this prefix] [this begin end]))
 
