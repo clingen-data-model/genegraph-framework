@@ -6,6 +6,7 @@
               [genegraph.framework.storage :as s]
               [genegraph.framework.storage.console-writer]
               [genegraph.framework.storage.rocksdb]
+              [genegraph.framework.storage.rdf]
               [clojure.spec.alpha :as spec]))
 
 (spec/def ::app
@@ -93,7 +94,7 @@
   {:enter
    (fn [e]
      #_(clojure.pprint/pprint e)
-     (clojure.pprint/pprint (s/get (get-in e [::s/storage :test-rocksdb]) :test))
+     (clojure.pprint/pprint (s/read (get-in e [::s/storage :test-rocksdb]) :test))
      (update e :effects conj [:global :test-rocksdb s/write (:key e) (:value e)]))})
 
 (def app-def
