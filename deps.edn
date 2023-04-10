@@ -23,5 +23,6 @@
   org.apache.jena/jena-tdb                          {:mvn/version "4.7.0"}
   org.apache.jena/jena-tdb2                         {:mvn/version "4.7.0"}
   org.apache.jena/jena-text                         {:mvn/version "4.7.0"}
-  org.apache.jena/jena-shacl                        {:mvn/version "4.7.0"}}}
+  org.apache.jena/jena-shacl                        {:mvn/version "4.7.0"}
+  cheshire                                          {:mvn/version "5.11.0"}}}
 

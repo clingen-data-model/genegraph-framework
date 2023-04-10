@@ -2,11 +2,18 @@
   "Storage processor for an RDF triplestore based on Apache Jena"
   (:require [genegraph.framework.protocol :as p]
             [genegraph.framework.storage.rdf.instance :as i]
-            [genegraph.framework.storage :as s])
+            [genegraph.framework.storage.rdf.names :as names]
+            [genegraph.framework.storage.rdf.algebra :as algebra]
+            [genegraph.framework.storage.rdf.types :as types]
+            [genegraph.framework.storage.rdf.query :as q]
+            [genegraph.framework.storage :as s]
+            [clojure.string :as string])
   (:import [org.apache.jena.rdf.model Model Resource ModelFactory
             ResourceFactory Statement]
            [org.apache.jena.tdb2 TDB2Factory]
-           [org.apache.jena.query ReadWrite QueryFactory QueryExecutionFactory Dataset]))
+           [org.apache.jena.query ReadWrite Query QueryFactory QueryExecutionFactory Dataset
+            QuerySolutionMap]
+           [org.apache.jena.sparql.algebra OpAsQuery]))
 
 (def instance-defaults
   {:queue-size 100})
@@ -49,10 +56,26 @@
                   (.read src nil (jena-rdf-format (:format opts :rdf-xml))))))
 
 
+
+(def m (read-rdf "file:///users/tristan/data/genegraph/2023-01-17T1950/base/dcterms.ttl"
+                 {:format :turtle}))
+
+(-> :rdfs/subClassOf types/resource)
+
+(-> :dc/LicenseDocument
+    (types/resource m)
+    (types/ld1-> [:rdfs/label]))
+
+(-> :dc/RightsStatement
+    (types/resource m)
+    (types/ld-> [[:rdfs/subClassOf :<]]))
+
+(def q (q/create-query "select ?x where { ?x :rdfs/subClassOf ?c }"))
+
+(q m {:c :dc/RightsStatement})
+
 (comment
-  (def m (read-rdf "file:///users/tristan/data/genegraph/2023-01-17T1950/base/dcterms.ttl"
-                  {:format :turtle}))
- (def test-db
+  (def test-db
    (-> {:name :test-rdf-dataset
         :type :rdf
         :path "/Users/tristan/Desktop/test-jena"}
@@ -61,4 +84,7 @@
  (s/write @(:instance test-db) "http://example.db/" m (promise))
  (type @(:instance test-db))
  (tx @(:instance test-db) (println (s/read @(:instance test-db) "http://example.db/")))
- (p/stop db))
+ (p/stop test-db))
+
+
+
