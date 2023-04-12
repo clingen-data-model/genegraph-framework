@@ -54,7 +54,7 @@
 (defn- exec [query-def model params]
   (let [qs-map (construct-query-solution-map params)
         query (construct-query-with-params query-def params)]
-    (with-open [qexec (QueryExecutionFactory/create query model qs-map)]
+    (with-open [qexec (QueryExecutionFactory/create query (types/model model) qs-map)]
       (cond
         (.isConstructType query) (.execConstruct qexec)
         (.isSelectType query) (if (= :count (get-in params [:genegraph.database.query/params :type]))
@@ -71,9 +71,9 @@
   (toString [_] (str query)))
 
 ;; TODO fix so that non-whitespace terminated expressions are treated appropriately
-(defn- expand-query-str [query-str]
+(defn expand-query-str [query-str]
   (string/replace query-str
-                  #":(\S+)/(\S+)"
+                  #":([a-zA-Z_0-9\-]+)/([a-zA-Z_0-9\-]+)"
                   (fn [[_ ns n]]
                     (str "<" (names/kw->iri (keyword ns n)) ">"))))
 

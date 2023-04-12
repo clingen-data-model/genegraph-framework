@@ -5,9 +5,10 @@
             [genegraph.framework.storage.rdf.names :as names]
             [genegraph.framework.storage.rdf.algebra :as algebra]
             [genegraph.framework.storage.rdf.types :as types]
-            [genegraph.framework.storage.rdf.query :as q]
+            [genegraph.framework.storage.rdf.query :as query]
             [genegraph.framework.storage :as s]
-            [clojure.string :as string])
+            [clojure.string :as string]
+            [clojure.java.io :as io])
   (:import [org.apache.jena.rdf.model Model Resource ModelFactory
             ResourceFactory Statement]
            [org.apache.jena.tdb2 TDB2Factory]
@@ -55,27 +56,43 @@
   ([src opts] (-> (ModelFactory/createDefaultModel)
                   (.read src nil (jena-rdf-format (:format opts :rdf-xml))))))
 
+(defn create-query
+  ([query-source] (create-query query-source {}))
+  ([query-source params] (query/create-query query-source params)))
 
+(defmacro declare-query [& queries]
+  (let [root# (-> *ns* str (string/replace #"\." "/") (string/replace #"-" "_") (str "/"))]
+    `(do ~@(map #(let [filename# (str root# (string/replace % #"-" "_" ) ".sparql")]
+                   `(def ~% (-> ~filename# io/resource slurp create-query)))
+                queries))))
 
-(def m (read-rdf "file:///users/tristan/data/genegraph/2023-01-17T1950/base/dcterms.ttl"
-                 {:format :turtle}))
-
-(-> :rdfs/subClassOf types/resource)
-
-(-> :dc/LicenseDocument
-    (types/resource m)
-    (types/ld1-> [:rdfs/label]))
-
-(-> :dc/RightsStatement
-    (types/resource m)
-    (types/ld-> [[:rdfs/subClassOf :<]]))
-
-(def q (q/create-query "select ?x where { ?x :rdfs/subClassOf ?c }"))
-
-(q m {:c :dc/RightsStatement})
+(defn union
+  "Create a new model that is the union of models"
+  [& models]
+  (let [union-model (ModelFactory/createDefaultModel)]
+    (doseq [model models] (.add union-model model))
+    union-model))
 
 (comment
-  (def test-db
+
+ (def m (read-rdf "file:///users/tristan/data/genegraph/2023-01-17T1950/base/dcterms.ttl"
+                  {:format :turtle}))
+
+ (-> :rdfs/subClassOf types/resource)
+
+ (-> :dc/LicenseDocument
+     (types/resource m)
+     (types/ld1-> [:rdfs/label]))
+
+ (-> :dc/RightsStatement
+     (types/resource m)
+     (types/ld-> [[:rdfs/subClassOf :<]]))
+
+ (def q (q/create-query "select ?x where { ?x :rdfs/subClassOf ?c }"))
+
+ (q m {:c :dc/RightsStatement})
+
+ (def test-db
    (-> {:name :test-rdf-dataset
         :type :rdf
         :path "/Users/tristan/Desktop/test-jena"}
@@ -84,6 +101,7 @@
  (s/write @(:instance test-db) "http://example.db/" m (promise))
  (type @(:instance test-db))
  (tx @(:instance test-db) (println (s/read @(:instance test-db) "http://example.db/")))
+ (time (tx @(:instance test-db) (into [] (q @(:instance test-db) {:c :dc/RightsStatement}))))
  (p/stop test-db))
 
 

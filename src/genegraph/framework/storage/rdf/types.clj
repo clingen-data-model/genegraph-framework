@@ -15,6 +15,7 @@
            [java.io
             ByteArrayOutputStream
             ByteArrayInputStream]
+           [org.apache.jena.query Dataset]
            [org.apache.jena.riot RDFDataMgr Lang]
            [org.apache.jena.datatypes.xsd.impl
             XSDBaseNumericType]))
@@ -46,6 +47,20 @@
   "Create an RDFResource given a reference"
   (resource [r] [r model]))
 
+(defprotocol AsModel
+  "Coerce argument into a model"
+  (model [this]))
+
+(extend-type Dataset
+
+  AsModel
+  (model [this] (.getUnionModel this)))
+
+(extend-type Model
+  
+  AsModel
+  (model [this] this))
+
 (declare datafy-resource)
 
 (declare navize)
@@ -69,84 +84,6 @@
            ::datafy/class (class o)
            `protocols/datafy #(-> % meta ::datafy/obj datafy-resource)})))
 
-#_(deftype RDFResource [resource model local-bindings]
-
-  AsJenaResource
-  (as-jena-resource [_] resource)
-
-  RDFType
-  (is-rdf-type? [this rdf-type] 
-    (let [t (if (= (type rdf-type) clojure.lang.Keyword) 
-              (local-names rdf-type)
-              (ResourceFactory/createResource rdf-type))]
-      (tx (.contains model resource (local-names :rdf/type) t))))
-
-  ;; TODO, returns all properties when k does not map to a known symbol,
-  ;; This seems to break the contract for ILookup
-  clojure.lang.ILookup
-  (valAt [this k] (or (get local-bindings k) (step k this)))
-  (valAt [this k nf] nf) ;; TODO fix this
-
-  ;; Conforms to the expectations for a sequence representation of a map. Includes only
-  ;; properties where this resource is the subject. Sequence is fully realized
-  ;; in order to permit access outside transaction
-  clojure.lang.Seqable
-  (seq [this]
-    (tx
-     (let [out-attributes (-> model (.listStatements resource nil nil) iterator-seq)]
-       (doall (map #(vector 
-                     (-> % .getPredicate property-uri->keyword)
-                     (to-clj (.getObject %) model)) out-attributes)))))
-
-  Object
-  (toString [_] (.toString resource))
-  (equals [this other]
-    (and (satisfies? AsJenaResource other)
-         (= resource (as-jena-resource other))))
-  (hashCode [_] (.hashCode resource))
-  
-
-  AsReference
-  (to-ref [_] (names/iri->kw (str resource)))
-
-  #_#_Datafiable
-  (datafy [_] 
-    (tx 
-     (let [out-attributes (-> model (.listStatements resource nil nil) iterator-seq)
-           in-attributes (-> model (.listStatements nil nil resource) iterator-seq)]
-
-       (with-meta
-         (into [] (concat
-                   (mapv #(with-meta [[(-> % .getPredicate property-uri->keyword) :>]
-                                      (-> % .getObject compose-object-for-datafy)]
-                            {:genegraph.database.query/value  (.getObject %)})
-                         out-attributes)
-                   (mapv #(with-meta [[(-> % .getPredicate property-uri->keyword) :<]
-                                      (-> % .getSubject compose-object-for-datafy)]
-                            {:genegraph.database.query/value (.getSubject %)})
-                         in-attributes)))
-         {`protocols/nav (navize model)}))))
-
-  ;; TODO Flattening the ld-> has potentially undesirable behavior with RDFList, consider
-  ;; how flatten is being used in this context
-  ThreadableData
-  (ld-> [this ks] (reduce (fn [nodes k]
-                            (->> nodes
-                                 (filter #(satisfies? ThreadableData %))
-                                 (map #(step k % model))
-                                 (filter seq) flatten))
-                          [this] 
-                          ks))
-  (ld1-> [this ks] (first (ld-> this ks))))
-
-
-#_(defn- navize [model]
-  (fn [coll k v]
-    (let [target (:genegraph.database.query/value (meta v))]
-      (if (instance? Resource target)
-        (create-resource target model)
-        target))))
-
 (extend-protocol AsResource
   
   java.lang.String
@@ -162,7 +99,7 @@
   org.apache.jena.rdf.model.Resource
   (resource
     ([r] r)
-    ([r model] (.inModel r model))))
+    ([r model] (.inModel r (model model)))))
 
 
 
