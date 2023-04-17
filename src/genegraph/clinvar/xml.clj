@@ -5,6 +5,8 @@
             [clojure.data.zip.xml :as xz])
   (:import [java.util.zip GZIPInputStream]))
 
+;; https://blog.korny.info/2014/03/08/xml-for-fun-and-profit.html
+
 (def clinvar-path "/users/tristan/data/clinvar.xml.gz")
 
 (defn id [n]
