@@ -1,0 +1,10 @@
+prefix gci: <http://dataexchange.clinicalgenome.org/gci/>
+prefix gcixform: <http://dataexchange.clinicalgenome.org/gcixform/>
+construct {
+  ?criterionAssessment :sepio/has-evidence ?evidenceLine .
+}
+where {
+  ?criterionAssessment a ?criterionAssessmentType .
+  ?evidenceLine a ?evidenceLineType .
+  ?criterionAssessmentType gcixform:hasEvidenceLineType ?evidenceLineType .
+}

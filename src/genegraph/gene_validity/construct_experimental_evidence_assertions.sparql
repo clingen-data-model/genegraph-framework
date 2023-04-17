@@ -1,0 +1,51 @@
+prefix gci: <http://dataexchange.clinicalgenome.org/gci/>
+
+construct
+{
+  ?classification :sepio/has-evidence ?experimentalEvidenceLine .
+  
+  ?experimentalEvidenceLine a :sepio/OverallExperimentalEvidenceLine ;
+  :sepio/evidence-line-strength-score ?experimentalEvidenceTotal ;
+  :sepio/has-evidence ?functionalEvidenceLine, ?functionalAlterationEvidenceLine, ?modelAndRescueEvidenceLine .
+
+  ?functionalEvidenceLine a :sepio/OverallFunctionalEvidenceLine ;
+  :sepio/evidence-line-strength-score ?functionTotal .
+
+  ?functionalAlterationEvidenceLine a :sepio/OverallFunctionalAlterationEvidenceLine ;
+  :sepio/evidence-line-strength-score ?functionalAlterationTotal .  
+
+  ?modelAndRescueEvidenceLine a :sepio/OverallModelAndRescueEvidenceLine ;
+  :sepio/evidence-line-strength-score  ?modelsRescueTotal .
+
+}
+where
+{
+  #### Bind evidence points
+  
+  ?classification a gci:provisionalClassification ;
+  gci:approvedClassification true ;
+  gci:classificationPoints ?pointsTree .
+
+  ?pointsTree gci:experimentalEvidenceTotal ?experimentalEvidenceTotal .
+
+  ?pointsTree gci:function ?functionTree .
+  ?functionTree gci:pointsCounted ?functionTotal .
+
+  ?pointsTree gci:functionalAlteration ?functionalAlterationTree .
+  ?functionalAlterationTree gci:pointsCounted ?functionalAlterationTotal .
+
+  ?pointsTree gci:modelsRescue ?modelsRescueTree .
+  ?modelsRescueTree gci:pointsCounted ?modelsRescueTotal .
+
+  ?pointsTree gci:segregation ?segregationTree .
+  ?segregationTree gci:pointsCounted ?segregationTotal .
+
+  BIND(IRI(CONCAT(str(?classification), "_experimental_evidence_line"))
+       AS ?experimentalEvidenceLine) .
+  BIND(IRI(CONCAT(str(?classification), "_functional_evidence_line"))
+       AS ?functionalEvidenceLine) .
+  BIND(IRI(CONCAT(str(?classification), "_functional_alteration_evidence_line"))
+       AS ?functionalAlterationEvidenceLine) .
+  BIND(IRI(CONCAT(str(?classification), "_model_rescue_evidence_line"))
+       AS ?modelAndRescueEvidenceLine) .
+}

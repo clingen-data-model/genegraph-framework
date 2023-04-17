@@ -1,0 +1,125 @@
+prefix gci: <http://dataexchange.clinicalgenome.org/gci/>
+prefix gcixform: <http://dataexchange.clinicalgenome.org/gcixform/>
+construct {
+   ?evidenceLine a ?evidenceLineType ;
+   :dc/description ?comments ;
+   :sepio/has-evidence ?evidenceItem ;
+   :dc/date-created ?dateCreated ;
+   :sepio/evidence-line-strength-score ?score ;
+   :sepio/score-status ?scoreStatus .
+
+# Case control evidence item
+    ?evidenceItem  a ?evidenceItemType ;
+    :dc/source ?article ;
+    :rdfs/label ?label ;
+    :obi/p-value ?pValue ;
+    :sepio/statistical-significance-type  ?statisticalSignificanceType ;
+    :sepio/statistical-significance-value-type ?statisticalSignificanceValueType ;
+    :sepio/statistical-significance-value ?statisticalSignificanceValue  ;
+    :stato/lower-confidence-limit ?confidenceFrom ;
+    :stato/upper-confidence-limit ?confidenceTo ;
+    :dc/description ?scoreExplanation ;
+    :sepio/has-case-cohort ?caseCohort ;
+    :sepio/has-control-cohort ?controlCohort .
+
+# Case cohort study
+    ?caseCohort a :stato/Cohort ;
+    :sepio/all-genotyped-sequenced ?caseAllGenotypedSequenced ;
+    :sepio/num-with-variant ?caseNumWithVariant ;
+    :sepio/detection-method ?caseDetectionMethod ;
+    :sepio/allele-frequency ?caseAlleleFrequency ;
+    :geno/related-condition ?commonDiagnosis ;
+    :sepio/has-evidence-item ?evidenceItem .
+
+# Control cohort study
+    ?controlCohort a :stato/Cohort ;
+    :sepio/all-genotyped-sequenced ?controlAllGenotypedSequenced ;
+    :sepio/num-with-variant ?controlNumWithVariant ;
+    :sepio/detection-method ?controlDetectionMethod ;
+    :sepio/allele-frequency ?controlAlleleFrequency ;
+    :sepio/has-evidence-item ?evidenceItem .
+}
+where {
+    ?evidenceLine a gci:caseControl ;
+    gci:label ?label ;
+    gci:studyType ?studyType ;
+    gci:date_created ?dateCreated ;
+    gci:statisticalValues ?statisticalValues ;
+    gci:scores ?scores .
+
+    OPTIONAL {
+        ?evidenceLine gci:pValue ?pValue .
+    }
+
+    OPTIONAL {
+        ?evidenceLine gci:comments ?comments .
+    }
+      OPTIONAL {
+        ?evidenceLine gci:confidenceIntervalFrom ?confidenceFrom .
+        ?evidenceLine gci:confidenceIntervalTo ?confidenceTo .
+    }
+
+    ?evidenceLineType gcixform:hasGCIType ?studyType ;
+    gcixform:hasEvidenceItemType ?evidenceItemType .
+
+    BIND(IRI(CONCAT(STR(?evidenceLine), "_cc_evidence_item")) AS ?evidenceItem) .
+
+    ?evidenceLine gci:caseCohort ?caseCohort .
+    ?caseCohort gci:numberAllGenotypedSequenced ?caseAllGenotypedSequenced ;
+    gci:numberWithVariant ?caseNumWithVariant ;
+    gci:method ?caseMethod .
+
+    OPTIONAL {
+        ?caseCohort gci:alleleFrequency ?caseAlleleFrequency ;
+    }
+
+    OPTIONAL {
+        ?caseCohort gci:commonDiagnosis ?commonDiagnosis .
+        ?commonDiagnosis a gci:disease .
+    }
+
+    OPTIONAL {
+        ?caseMethod gci:specificMutationsGenotypedMethod ?caseDetectionMethod .
+    }
+
+    ?evidenceLine gci:controlCohort ?controlCohort .
+    ?controlCohort gci:numberAllGenotypedSequenced ?controlAllGenotypedSequenced ;
+    gci:numberWithVariant ?controlNumWithVariant ;
+    gci:method ?controlMethod .
+  
+    OPTIONAL {
+        ?controlCohort gci:alleleFrequency ?controlAlleleFrequency ;
+    }
+
+    OPTIONAL {
+        ?controlMethod gci:specificMutationsGenotypedMethod ?controlDetectionMethod .
+    }
+
+    ?statisticalValues gci:otherType ?statisticalSignificanceType .
+    
+    OPTIONAL {
+        ?statisticalValues gci:valueType ?statisticalSignificanceValueType .
+    }
+
+    OPTIONAL {
+        ?statisticalValues gci:value ?statisticalSignificanceValue .
+    }
+
+    ?scores a gci:evidenceScore .
+    OPTIONAL {
+        ?scores gci:score ?score .
+    }
+
+    OPTIONAL {
+        ?scores gci:scoreStatus ?scoreStatus .
+    }
+
+    OPTIONAL {
+        ?scores gci:scoreExplanation ?scoreExplanation .
+    }
+
+    ?annotation gci:caseControlStudies ?evidenceLine .
+    ?annotation gci:article ?articleGroup .
+    ?articleGroup gci:pmid ?pmid .
+    BIND(IRI(CONCAT(?pmbase, ?pmid)) AS ?article) .
+ }

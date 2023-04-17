@@ -9,7 +9,7 @@
  :paths ["src"]
 
  :deps
- {org.clojure/clojure {:mvn/version "1.11.1"}
+ {org.clojure/clojure                               {:mvn/version "1.11.1"}
   io.pedestal/pedestal.jetty                        {:mvn/version "0.5.10"}
   io.pedestal/pedestal.service                      {:mvn/version "0.5.10"}
   org.rocksdb/rocksdbjni                            {:mvn/version "7.10.2"}
@@ -24,5 +24,16 @@
   org.apache.jena/jena-tdb2                         {:mvn/version "4.7.0"}
   org.apache.jena/jena-text                         {:mvn/version "4.7.0"}
   org.apache.jena/jena-shacl                        {:mvn/version "4.7.0"}
-  cheshire                                          {:mvn/version "5.11.0"}}}
+  com.google.cloud/google-cloud-storage             {:mvn/version "2.22.0"}
+
+  ;; Following may be more deps
+  metosin/jsonista                                  {:mvn/version "0.3.7"} ; Maybe faster JSON?
+  cheshire                                          {:mvn/version "5.11.0"} ;current json
+  hato/hato {:mvn/version "0.9.0"} ; Faster HTTP handling (http2)
+  org.clj-commons/hickory {:mvn/version "0.7.3"} ; XML handling (maybe not used)
+
+  ;; large xml handling 
+  org.clojure/data.xml {:mvn/version "0.0.8"} ; large XML handling
+  org.clojure/data.zip {:mvn/version "1.0.0"} 
+}}
 
