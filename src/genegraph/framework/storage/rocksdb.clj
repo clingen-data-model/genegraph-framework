@@ -4,8 +4,16 @@
             [taoensso.nippy :as nippy]
             [clojure.java.io :as io]
             [digest])
-  (:import (org.rocksdb Options ReadOptions RocksDB Slice)
+  (:import (org.rocksdb Options ReadOptions RocksDB Slice CompressionType)
            java.util.Arrays))
+
+
+
+(defn open [path]
+  (io/make-parents path)
+  (RocksDB/open (doto (Options.)
+                  (.setCreateIfMissing true)
+                  (.setCompressionType CompressionType/LZ4_COMPRESSION)) path))
 
 (defrecord RocksDBInstance [name
                             type
@@ -16,18 +24,11 @@
   (start [this]
     (io/make-parents path)
     (reset! instance
-            (RocksDB/open (.setCreateIfMissing (Options.) true)
-                          path))
+            (open path))
     this)
   (stop [this]
     (.close @instance)
     this))
-
-
-
-(defn open [path]
-  (io/make-parents path)
-  (RocksDB/open (.setCreateIfMissing (Options.) true) path))
 
 (defmethod p/init :rocksdb [db-def]
   (map->RocksDBInstance

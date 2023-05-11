@@ -10,13 +10,24 @@
 
  :deps
  {org.clojure/clojure                               {:mvn/version "1.11.1"}
+
+  ;; Interceptors and HTTP server
   io.pedestal/pedestal.jetty                        {:mvn/version "0.5.10"}
   io.pedestal/pedestal.service                      {:mvn/version "0.5.10"}
-  org.rocksdb/rocksdbjni                            {:mvn/version "7.10.2"}
+  org.clojure/core.async                            {:mvn/version "1.6.673"} ; update for pedestal
+  
+  ;; Serialization
   com.taoensso/nippy                                {:mvn/version "3.2.0"}
   digest/digest                                     {:mvn/version "1.4.10"}
+
   org.apache.kafka/kafka-clients                    {:mvn/version "3.4.0"}
-  org.clojure/core.async                            {:mvn/version "1.6.673"}
+
+  ;; Datastores
+  
+  ;; Rocks 
+  org.rocksdb/rocksdbjni                            {:mvn/version "7.10.2"}
+  
+  ;; Jena 
   org.apache.jena/jena-arq                          {:mvn/version "4.7.0"}
   org.apache.jena/jena-core                         {:mvn/version "4.7.0"}
   org.apache.jena/jena-iri                          {:mvn/version "4.7.0"}
@@ -24,8 +35,19 @@
   org.apache.jena/jena-tdb2                         {:mvn/version "4.7.0"}
   org.apache.jena/jena-text                         {:mvn/version "4.7.0"}
   org.apache.jena/jena-shacl                        {:mvn/version "4.7.0"}
+
+  ;; Google Cloud Storage
   com.google.cloud/google-cloud-storage             {:mvn/version "2.22.0"}
 
+  ;; SQL
+  com.github.seancorfield/next.jdbc {:mvn/version "1.3.874"}
+  org.xerial/sqlite-jdbc {:mvn/version "3.39.2.1"}
+
+  ;; HTSlib
+  com.github.samtools/htsjdk {:mvn/version "3.0.5"}
+
+  ;; Experimentation below
+  
   ;; Following may be more deps
   metosin/jsonista                                  {:mvn/version "0.3.7"} ; Maybe faster JSON?
   cheshire                                          {:mvn/version "5.11.0"} ;current json
@@ -34,6 +56,13 @@
 
   ;; large xml handling 
   org.clojure/data.xml {:mvn/version "0.0.8"} ; large XML handling
-  org.clojure/data.zip {:mvn/version "1.0.0"} 
+  org.clojure/data.zip {:mvn/version "1.0.0"}
+
+  ;; Prolly VRS specific, for caching query results
+  org.clojure/core.cache {:mvn/version "1.0.225"}
+
+  ;; experimenting with datasets
+  techascent/tech.ml.dataset {:mvn/version "7.000-beta-38"}
+
 }}
 
