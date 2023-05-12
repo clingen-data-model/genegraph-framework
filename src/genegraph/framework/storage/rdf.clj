@@ -9,7 +9,8 @@
             [genegraph.framework.storage :as s]
             [clojure.string :as string]
             [clojure.java.io :as io])
-  (:import [org.apache.jena.rdf.model Model Resource ModelFactory
+  (:import [java.io ByteArrayOutputStream]
+           [org.apache.jena.rdf.model Model Resource ModelFactory
             ResourceFactory Statement]
            [org.apache.jena.tdb2 TDB2Factory]
            [org.apache.jena.query ReadWrite Query QueryFactory QueryExecutionFactory Dataset
@@ -73,10 +74,41 @@
     (doseq [model models] (.add union-model model))
     union-model))
 
+(defn to-turtle [model]
+  (let [os (ByteArrayOutputStream.)]
+    (.write model os "TURTLE")
+    (.toString os)))
+
+(defn pp-model
+  "Print a turtle-like string of model, with iri values
+  substituted for local keywords when available."
+  [model]
+  (let [statements (iterator-seq (.listStatements model))
+        predicate-iri-kw (map #(vector % (names/iri->kw %))
+                              (set (map #(str (.getPredicate %)) statements)))
+        object-iri-kw (map #(vector % (names/iri->kw %))
+                           (set (map #(str (.getObject %)) statements)))]
+    (println
+     (reduce (fn [model-str [iri kw]]
+               (string/replace model-str
+                          (str "<" iri ">")
+                          (str kw)))
+             (to-turtle (.clearNsPrefixMap model))
+             (filter second ; remove when no mapping exists
+                     (concat predicate-iri-kw object-iri-kw))))))
+
 (comment
 
- (def m (read-rdf "file:///users/tristan/data/genegraph/2023-01-17T1950/base/dcterms.ttl"
+ (def m (read-rdf "file:///users/tristan/data/genegraph/2023-04-13T1609/base/dcterms.ttl"
                   {:format :turtle}))
+
+ (->> (iterator-seq (.listStatements m))
+      (map #(str (.getPredicate %)))
+      set
+      (map (fn [iri] [iri (names/iri->kw iri)]))
+      (take 5))
+
+ (pp-model m)
 
  (-> :rdfs/subClassOf types/resource)
 
