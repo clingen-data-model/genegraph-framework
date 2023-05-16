@@ -260,6 +260,8 @@
          #_frequencies
          (into [])))
 
+  (count non-spdi-ep-variants)
+
   (->> non-spdi-ep-variants
        #_(map #(get-in % [:variation :type]))
        (map #(some-> % :variation :sequence-location first :variant-length))
