@@ -135,6 +135,3 @@
  (tx @(:instance test-db) (println (s/read @(:instance test-db) "http://example.db/")))
  (time (tx @(:instance test-db) (into [] (q @(:instance test-db) {:c :dc/RightsStatement}))))
  (p/stop test-db))
-
-
-

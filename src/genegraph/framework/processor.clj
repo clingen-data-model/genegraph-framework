@@ -43,6 +43,14 @@
     [(storage-interceptor (atom {:test-storage {:instance (atom :s)}}) [:test-storage])])))
 
 
+;; name -- name of processor
+;; subscribe -- topic to source events from
+;; storage -- storage entities to pass forward to event handling
+;; topics -- topics to publish processed events to
+;; state -- :running or :stopped
+;; interceptors -- interceptor chain
+;; params -- additional configuration parameters to pass into event
+
 (defrecord Processor [name
                       subscribe
                       storage
