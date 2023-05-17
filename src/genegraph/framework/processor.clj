@@ -49,14 +49,17 @@
 ;; topics -- topics to publish processed events to
 ;; state -- :running or :stopped
 ;; interceptors -- interceptor chain
-;; params -- additional configuration parameters to pass into event
+;; options -- additional configuration parameters to pass into events and init fn
+;; init-fn -- optional init fn, runs prior to processor start
 
 (defrecord Processor [name
                       subscribe
                       storage
                       topics
                       state
-                      interceptors]
+                      interceptors
+                      options
+                      init-fn]
 
   p/Lifecycle
   (start [this]
@@ -69,7 +72,7 @@
              (when-let [event (p/poll (get-subscribed-topic this))]
                (interceptor-chain/execute
                 (interceptor-chain/enqueue
-                 event
+                 (assoc event ::options options)
                  (cons
                   add-storage
                   (:interceptors this)))))
