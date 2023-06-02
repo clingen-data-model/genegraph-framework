@@ -20,6 +20,25 @@
 (defprotocol RangeDelete
   (range-delete [this prefix] [this begin end]))
 
+(defn store
+  "Add deferred write effect to event"
+  [event instance k v]
+  (let [commit-promise (promise)]
+    (println "instance " instance)
+    (println "store " (get-in event [::storage instance]))
+    (println "storage keys " (keys (::storage event))) 
+    (update event
+            :effects
+            conj
+            {:command write
+             :args [(get-in event [::storage instance]) k v commit-promise]
+             :commit-promise commit-promise})))
+
+(comment
+  (store {::storage {:some-storage 'some-storage}} :some-storage :key "value")
+  )
+
+
 
 ;; write (key-value)
 ;; get (key)

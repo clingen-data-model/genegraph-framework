@@ -15,7 +15,8 @@
            [org.apache.jena.tdb2 TDB2Factory]
            [org.apache.jena.query ReadWrite Query QueryFactory QueryExecutionFactory Dataset
             QuerySolutionMap]
-           [org.apache.jena.sparql.algebra OpAsQuery]))
+           [org.apache.jena.sparql.algebra OpAsQuery]
+           [org.apache.jena.riot RDFDataMgr Lang]))
 
 (def instance-defaults
   {:queue-size 100})
@@ -96,6 +97,8 @@
              (to-turtle (.clearNsPrefixMap model))
              (filter second ; remove when no mapping exists
                      (concat predicate-iri-kw object-iri-kw))))))
+
+
 
 (comment
 

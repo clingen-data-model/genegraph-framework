@@ -16,7 +16,7 @@
             Storage$BlobListOption
             Blob$BlobSourceOption]
            (com.google.cloud WriteChannel)
-           (java.nio.channels WritableByteChannel)
+           (java.nio.channels WritableByteChannel Channels)
            (java.nio.charset StandardCharsets)))
 
 (defn- storage []
@@ -58,18 +58,23 @@
                          "/Users/tristan/Desktop/test-back.txt")
   )
 
+(defn ^WriteChannel open-write-channel
+  "Returns a function which when called returns an open WriteChannel to blob-name"
+  [^String bucket-name ^String blob-name]
+  (let [gc-storage (.getService (StorageOptions/getDefaultInstance))
+        blob-id (BlobId/of bucket-name blob-name)
+        blob-info (-> blob-id BlobInfo/newBuilder (.setContentType (:content-type "application/gzip")) .build)]
+    (.writer gc-storage blob-info (make-array Storage$BlobWriteOption 0))))
+
+(comment
+  (with-open [wc (get-write-channel "genegraph-framework-dev" "test.txt")
+              os (Channels/newOutputStream wc)
+              is (io/input-stream "/Users/tristan/desktop/test.txt")]
+    (.transferTo is os))
+  )
+
 ;; Functions below waiting for a use case in genegraph-framework
 ;; may want to handle channel functions at some point
-
-#_(defn ^WriteChannel get-bucket-write-channel
-  "Returns a function which when called returns an open WriteChannel to blob-name within env/genegraph-bucket"
-  ([^String blob-name]
-   (get-bucket-write-channel env/genegraph-bucket blob-name))
-  ([^String bucket-name ^String blob-name]
-   (let [gc-storage (.getService (StorageOptions/getDefaultInstance))
-         blob-id (BlobId/of bucket-name blob-name)
-         blob-info (-> blob-id BlobInfo/newBuilder (.setContentType (:content-type "application/gzip")) .build)]
-     (fn [] (.writer gc-storage blob-info (make-array Storage$BlobWriteOption 0))))))
 
 #_(defn channel-write-string!
   "Write a string in UTF-8 to a WriteableByteChannel.

@@ -25,12 +25,10 @@
                     (update-vals @(:storage processor)
                                  (fn [s] @(:instance s)))))
     :leave (fn [event]
-             (run! (fn [{:keys [scope store command args commit-promise]}]
-                     (println scope command store args)
-                     (apply command
-                            (get (::s/storage event) store)
-                            args))
-                   (:effects event)))}))
+             (run! (fn [{:keys [store command args commit-promise]}]
+                     (apply command args))
+                   (:effects event))
+             event)}))
 
 (defn get-subscribed-topic
   [processor]
@@ -42,6 +40,23 @@
     {:type :event :key :k :value :v}
     [(storage-interceptor (atom {:test-storage {:instance (atom :s)}}) [:test-storage])])))
 
+(defn ->interceptor 
+  "Transform input to Pedestal interceptor. The primary use case for
+  this is to render symbols as an interceptor, allowing for dynamic resolution
+  in a running system."
+  [v]
+  (if (symbol? v)
+    (interceptor/interceptor
+     {:enter (var-get (resolve v))})
+    (interceptor/interceptor v)))
+
+(defn process-event [processor event]
+  (interceptor-chain/execute
+   (interceptor-chain/enqueue
+    (assoc event ::options (:options processor))
+    (cons
+     (storage-interceptor processor)
+     (mapv ->interceptor (:interceptors processor))))))
 
 ;; name -- name of processor
 ;; subscribe -- topic to source events from
@@ -63,27 +78,23 @@
 
   p/Lifecycle
   (start [this]
-    (let [add-storage (storage-interceptor this)]
-      (reset! (:state this) :running)
-      (.start
-       (Thread.
-        #(while (= :running @(:state this))
-           (try 
-             (when-let [event (p/poll (get-subscribed-topic this))]
-               (interceptor-chain/execute
-                (interceptor-chain/enqueue
-                 (assoc event ::options options)
-                 (cons
-                  add-storage
-                  (:interceptors this)))))
-             (catch Exception e
-               (clojure.stacktrace/print-stack-trace e))))))))
+    (reset! (:state this) :running)
+    (.start
+     (Thread.
+      #(while (= :running @(:state this))
+         (try 
+           (when-let [event (p/poll (get-subscribed-topic this))]
+             (process-event this event))
+           (catch Exception e
+             (clojure.stacktrace/print-stack-trace e)))))))
   (stop [this]
     (reset! (:state this) :stopped)))
+
+
 
 (defmethod p/init :processor [processor-def]
   (-> processor-def
       (assoc :state (atom :stopped))
-      (update :interceptors
-              #(mapv interceptor/interceptor %))
+      #_ (update :interceptors
+              #(mapv ->interceptor %))
       map->Processor))

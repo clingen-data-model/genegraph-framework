@@ -90,12 +90,25 @@
   (p/offer (get @(:entities app) :test-topic) {:key :k :value :v})
   app)
 
+(defn test-interceptor-fn [event]
+  (println "the value be" (:value event))
+  event)
+
+;; TODO should just write a function to construct
+;; an interceptor with a function reference
+;; mostly want to offer a level of indirection
+;; given a function reference
+
 (def test-interceptor
+  {:enter (fn [e] (test-interceptor-fn e))})
+
+#_(def test-interceptor
   {:enter
    (fn [e]
      #_(clojure.pprint/pprint e)
      (clojure.pprint/pprint (s/read (get-in e [::s/storage :test-rocksdb]) :test))
-     (update e :effects conj [:global :test-rocksdb s/write (:key e) (:value e)]))})
+     e
+     #_(update e :effects conj [:global :test-rocksdb s/write (:key e) (:value e)]))})
 
 (def app-def
   {:kafka-clusters {:dx-ccloud
@@ -122,13 +135,14 @@
               :path "/users/tristan/desktop/test-rocks"}}
    :processors {:test-processor
                 {:subscribe :test-topic
-                 :interceptors [test-interceptor]}}})
+                 :interceptors `[test-interceptor-fn]}}})
 
 (comment
   (def a (create app-def))
   (p/start a)
-  (-> a :topics deref first (p/offer {:key :k :value :v}))
-  a
+  (:topics a)
+  (-> a :topics deref :test-topic (p/offer {:key :k :value :v}))
+  (-> a :processors deref :test-processor (processor/process-event {:key :k :value :v}))
   (p/stop a)
   (-> a :topics deref :test-topic (p/offer {:key :test :value "bork"}))
   @(:topics a))

@@ -108,7 +108,6 @@
   "Execute command on dataset"
   [dataset command]
   ;; consider raising exception if bad command
-  (println "execute command")
   (case (:command command)
     :replace (.replaceNamedModel dataset
                                  (:model-name command)
