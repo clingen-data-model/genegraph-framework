@@ -1,6 +1,5 @@
 (ns genegraph.clinvar.variation
   (:require [hato.client :as hc]
-            [jsonista.core :as j]
             [next.jdbc :as jdbc]
             [clojure.string :as s]
             [clojure.walk :as walk])

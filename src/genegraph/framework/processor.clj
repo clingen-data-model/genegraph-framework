@@ -2,6 +2,7 @@
   "Logic to handle processing over topics"
   (:require [genegraph.framework.protocol :as p]
             [genegraph.framework.storage :as s]
+            [genegraph.framework.event :as event]
             [io.pedestal.interceptor :as interceptor]
             [io.pedestal.interceptor.chain :as interceptor-chain]
             [clojure.spec.alpha :as spec]))
@@ -10,6 +11,17 @@
   (spec/keys :req-un [::name ::subscribe]))
 
 (spec/def ::status #(:running :stopped))
+
+(defn metadata-interceptor
+  "Decorate the event with appropriate metadata by merging metadata from
+   event on top of metadata from processor"
+  [processor]
+  (interceptor/interceptor
+   {:name ::metadata-interceptor
+    :enter (fn [event]
+             (merge event
+                    (::event/metadata processor)
+                    (::event/metadata event)))}))
 
 (defn storage-interceptor
   "Returns an interceptor for managing storage related to events.
@@ -25,20 +37,24 @@
                     (update-vals @(:storage processor)
                                  (fn [s] @(:instance s)))))
     :leave (fn [event]
-             (run! (fn [{:keys [store command args commit-promise]}]
-                     (apply command args))
-                   (:effects event))
-             event)}))
+             (try
+               (run! (fn [{:keys [store command args commit-promise]}]
+                       (apply command args))
+                     (:effects event))
+               event
+               (catch Exception e (assoc event :error {:fn ::storage-interceptor
+                                                       :exception e}))))}))
+
+;; This one doesn't require a reference to the containing processor
+;; so can exist as a simple def
+(def deserialize-interceptor
+  (interceptor/interceptor
+   {:name ::deserialize-interceptor
+    :enter (fn [e] (event/deserialize e))}))
 
 (defn get-subscribed-topic
   [processor]
   (get @(:topics processor) (:subscribe processor)))
-
-(comment
-  (interceptor-chain/execute
-   (interceptor-chain/enqueue
-    {:type :event :key :k :value :v}
-    [(storage-interceptor (atom {:test-storage {:instance (atom :s)}}) [:test-storage])])))
 
 (defn ->interceptor 
   "Transform input to Pedestal interceptor. The primary use case for
@@ -50,13 +66,20 @@
      {:enter (var-get (resolve v))})
     (interceptor/interceptor v)))
 
-(defn process-event [processor event]
-  (interceptor-chain/execute
-   (interceptor-chain/enqueue
-    (assoc event ::options (:options processor))
-    (cons
+(defn add-interceptors [event processor]
+  (interceptor-chain/enqueue
+   event
+   (concat
+    [(metadata-interceptor processor)
      (storage-interceptor processor)
-     (mapv ->interceptor (:interceptors processor))))))
+     deserialize-interceptor]
+    (mapv ->interceptor (:interceptors processor)))))
+
+(defn process-event [processor event]
+  (-> event
+      (add-interceptors processor)
+      (interceptor-chain/terminate-when :error)
+      interceptor-chain/execute))
 
 ;; name -- name of processor
 ;; subscribe -- topic to source events from

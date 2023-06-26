@@ -49,7 +49,7 @@
   ;; Experimentation below
   
   ;; Following may be more deps
-  metosin/jsonista                                  {:mvn/version "0.3.7"} ; Maybe faster JSON?
+  org.clojure/data.json {:mvn/version "2.4.0"}
   cheshire                                          {:mvn/version "5.11.0"} ;current json
   hato/hato {:mvn/version "0.9.0"} ; Faster HTTP handling (http2)
   org.clj-commons/hickory {:mvn/version "0.7.3"} ; XML handling (maybe not used)

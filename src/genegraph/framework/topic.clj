@@ -78,26 +78,26 @@
                   :type :topic
                   :buffer-size 3}))
   (p/offer t {:hi :there})
-  (p/poll t))
+  (p/poll t)
 
-(let [tps [(TopicPartition. "actionability" 0)]]
-  (with-open [c (doto (KafkaConsumer.
-                       {"ssl.endpoint.identification.algorithm" "https",
-                        "sasl.mechanism" "PLAIN",
-                        "request.timeout.ms" "20000",
-                        "bootstrap.servers" "pkc-4yyd6.us-east1.gcp.confluent.cloud:9092",
-                        "retry.backoff.ms" "500",
-                        "security.protocol" "SASL_SSL",
-                        "sasl.jaas.config" (System/getenv "DX_JAAS_CONFIG"),
-                        "key.deserializer" "org.apache.kafka.common.serialization.StringDeserializer",
-                        "value.deserializer" "org.apache.kafka.common.serialization.StringDeserializer"})
-                  (.assign tps)
-                  (.seekToBeginning tps))]
-    #_(.partitionsFor c "actionability")
-    (->> (.poll c (Duration/ofMillis 100))
+  (let [tps [(TopicPartition. "actionability" 0)]]
+    (with-open [c (doto (KafkaConsumer.
+                         {"ssl.endpoint.identification.algorithm" "https",
+                          "sasl.mechanism" "PLAIN",
+                          "request.timeout.ms" "20000",
+                          "bootstrap.servers" "pkc-4yyd6.us-east1.gcp.confluent.cloud:9092",
+                          "retry.backoff.ms" "500",
+                          "security.protocol" "SASL_SSL",
+                          "sasl.jaas.config" (System/getenv "DX_JAAS_CONFIG"),
+                          "key.deserializer" "org.apache.kafka.common.serialization.StringDeserializer",
+                          "value.deserializer" "org.apache.kafka.common.serialization.StringDeserializer"})
+                    (.assign tps)
+                    (.seekToBeginning tps))]
+      #_(.partitionsFor c "actionability")
+      (->> (.poll c (Duration/ofMillis 100))
            .iterator
            iterator-seq
-           count)))
+           count))))
 
 #_(spec/explain ::topic {::aname :test})
 

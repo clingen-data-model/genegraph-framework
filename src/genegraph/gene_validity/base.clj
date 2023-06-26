@@ -1,3 +1,5 @@
+;; TODO delete this file; moving base functionality into a separate module
+
 (ns genegraph.gene-validity.base
   (:require [genegraph.framework.storage.rdf :as rdf]
             [genegraph.framework.storage.gcs :as gcs]
@@ -11,7 +13,15 @@
   (:import [java.io File InputStream OutputStream]
            [java.nio.channels Channels]))
 
-
+;; formats
+;; RDF: RDFXML, Turtle, JSON-LD
+;; ucsc-cytoband
+;; affiliations
+;; loss-intolerance
+;; hi-index
+;; features
+;; genes
+;;
 
 (defn init [options]
   (io/make-parents (:data-path options))
@@ -60,9 +70,6 @@
       (assoc event
              ::rdf/model (rdf/read-rdf is (:reader-opts file-definition))
              ::rdf/iri (:name file-definition)))))
-
-(def load-base-data-interceptor
-  {:enter load-base-file})
 
 (comment
   (load-base-file {::data-path "/Users/tristan/data/genegraph/2023-04-13T1609/base"

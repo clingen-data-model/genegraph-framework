@@ -98,11 +98,10 @@
              (filter second ; remove when no mapping exists
                      (concat predicate-iri-kw object-iri-kw))))))
 
-
-
 (comment
 
- (def m (read-rdf "file:///users/tristan/data/genegraph/2023-04-13T1609/base/dcterms.ttl"
+ (def m (read-rdf 
+"file:///users/tristan/data/genegraph/2023-04-13T1609/base/dcterms.ttl"
                   {:format :turtle}))
 
  (->> (iterator-seq (.listStatements m))

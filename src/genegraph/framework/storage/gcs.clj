@@ -1,7 +1,8 @@
 (ns genegraph.framework.storage.gcs
   (:require [clojure.java.io :as io]
             [io.pedestal.log :as log]
-            [genegraph.framework.storage :as storage])
+            [genegraph.framework.storage :as storage]
+            [genegraph.framework.protocol :as p])
   (:import [java.time ZonedDateTime ZoneOffset]
            java.time.format.DateTimeFormatter
            [java.nio ByteBuffer]
@@ -72,6 +73,87 @@
               is (io/input-stream "/Users/tristan/desktop/test.txt")]
     (.transferTo is os))
   )
+
+
+
+
+(defn write-input-stream-to-bucket [bucket k is]
+  (with-open [wc (open-write-channel bucket k)
+              os (Channels/newOutputStream wc)]
+    (.transferTo is os)))
+
+
+(defn open-input-stream-on-bucket-object [bucket k]
+  (Channels/newInputStream
+   (.reader (storage)
+            bucket
+            k
+            (make-array Storage$BlobSourceOption 0))))
+
+(comment
+  (with-open [ic (open-input-stream-on-bucket-object
+                  "genegraph-framework-dev"
+                  "test-file.txt")]
+    (slurp ic))
+  )
+
+(defrecord GCSBucket [bucket]
+
+  ;; key is expected to be reasonable blob ID,
+  ;; value is expected to be an InputStream.
+  ;; functionality may be added later to allow queued,
+  ;; asynchronous writes.
+  storage/IndexedWrite
+  (write [this k v]
+    (write-input-stream-to-bucket bucket k v))
+  (write [this k v commit-promise]
+    (write-input-stream-to-bucket bucket k v)
+    (deliver commit-promise true))
+
+  ;; 
+  storage/IndexedRead
+  (read [this k]
+    (open-input-stream-on-bucket-object bucket k))
+  
+  )
+
+(comment
+  (with-open [is (io/input-stream "/Users/tristan/Desktop/test.txt")]
+    (storage/write (map->GCSBucket {:bucket "genegraph-framework-dev"})
+                   "test-file.txt"
+                   is))
+  (slurp
+   (storage/read (map->GCSBucket {:bucket "genegraph-framework-dev"})
+                 "test-file.txt"))
+
+  )
+
+;; Communication with Google Cloud does not require the
+;; same sort of initialization as some of the other storage
+;; systems do (or to the extent it does, it is handled by
+;; upstream libraries. Most of this is included for compatibility
+;; with other parts of the storage infrastructure.
+
+;; That being said, once could imagine attaching other 
+(defrecord GCS [name
+                type
+                bucket
+                state
+                instance]
+
+  p/Lifecycle
+  (start [this]
+    (reset! state :started)
+    this)
+  (stop [this]
+    (reset! state :stopped)
+    this))
+
+(defmethod p/init :gcs-bucket [bucket-def]
+  (map->GCS
+   (assoc bucket-def
+          :state (atom :stopped)
+          :instance (atom (map->GCSBucket bucket-def)))))
 
 ;; Functions below waiting for a use case in genegraph-framework
 ;; may want to handle channel functions at some point

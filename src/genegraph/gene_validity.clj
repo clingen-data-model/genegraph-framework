@@ -1,5 +1,5 @@
 (ns genegraph.gene-validity
-  (:require [genegraph.gene-validity.base :as base]
+  (:require [genegraph.base :as base]
             [genegraph.framework.app :as app]
             [genegraph.framework.protocol :as p]
             [genegraph.framework.storage.rdf :as rdf]
@@ -42,7 +42,7 @@
    :processors {:base-processor
                 {:subscribe :base
                  :initial-events gene-validity-initialization-events
-                 :interceptors [base/load-base-data-interceptor]}}})
+                 :interceptors `[base/load-base-data-interceptor]}}})
 
 
 (comment

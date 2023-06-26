@@ -7,6 +7,8 @@
               [genegraph.framework.storage.console-writer]
               [genegraph.framework.storage.rocksdb]
               [genegraph.framework.storage.rdf]
+              [genegraph.framework.storage.gcs]
+              [genegraph.framework.event :as event]
               [clojure.spec.alpha :as spec]))
 
 (spec/def ::app
@@ -91,7 +93,7 @@
   app)
 
 (defn test-interceptor-fn [event]
-  (println "the value be" (:value event))
+  (println "the value be" (::event/value event))
   event)
 
 ;; TODO should just write a function to construct
@@ -142,7 +144,21 @@
   (p/start a)
   (:topics a)
   (-> a :topics deref :test-topic (p/offer {:key :k :value :v}))
-  (-> a :processors deref :test-processor (processor/process-event {:key :k :value :v}))
+  (-> a
+      :processors
+      deref
+      :test-processor
+      (processor/process-event {::event/key :k
+                                ::event/value "{\"object\":\"value\"}"
+                                ::event/metadata {::event/format :json}}))
+  (-> a
+      :processors
+      deref
+      :test-processor
+      (processor/process-event {::event/key :k
+                                ::event/value "{:object \"value\"}"
+                                ::event/metadata {::event/format :edn}}))
+  
   (p/stop a)
   (-> a :topics deref :test-topic (p/offer {:key :test :value "bork"}))
   @(:topics a))
