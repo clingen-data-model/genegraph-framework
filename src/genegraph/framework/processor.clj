@@ -52,6 +52,17 @@
    {:name ::deserialize-interceptor
     :enter (fn [e] (event/deserialize e))}))
 
+(defn publish-interceptor [processor]
+  (interceptor/interceptor
+   {:name ::publish-interceptor
+    :enter (fn [event]
+             (assoc event
+                    ::event/topics
+                    @(:topics processor)))
+    :leave (fn [event]
+
+             event)}))
+
 (defn get-subscribed-topic
   [processor]
   (get @(:topics processor) (:subscribe processor)))
@@ -71,6 +82,7 @@
    event
    (concat
     [(metadata-interceptor processor)
+     (publish-interceptor processor)
      (storage-interceptor processor)
      deserialize-interceptor]
     (mapv ->interceptor (:interceptors processor)))))

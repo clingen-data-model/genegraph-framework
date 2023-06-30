@@ -6,9 +6,4 @@
 
 
 
-(defn add-input-stream
-  "Decorate the event with an input stream supplying the data
-  from the source."
-  [event]
-  (if (:data-path event)
-    ))
+

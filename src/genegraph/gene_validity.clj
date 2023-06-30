@@ -1,22 +1,8 @@
 (ns genegraph.gene-validity
-  (:require [genegraph.base :as base]
-            [genegraph.framework.app :as app]
+  (:require [genegraph.framework.app :as app]
             [genegraph.framework.protocol :as p]
-            [genegraph.framework.storage.rdf :as rdf]
-            [genegraph.framework.storage :as storage]
             [clojure.java.io :as io]
             [clojure.edn :as edn]))
-
-(def gene-validity-initialization-events
-  (-> (io/resource "genegraph/gene_validity/base.edn")
-      slurp
-      edn/read-string))
-
-(defn store-model [event]
-  (storage/store event
-                 (get-in event [:storage :tdb])
-                 (::rdf/iri event)
-                 (::rdf/model event)))
 
 (def gene-validity-genegraph-app
   {:kafka-clusters {:dx-ccloud
@@ -35,14 +21,20 @@
                                 "org.apache.kafka.common.serialization.StringSerializer"
                                 "value.serializer"
                                 "org.apache.kafka.common.serialization.StringSerializer"}}}
-   :topics {:base {}}
-   :storage {:tdb
-             {:type :rdf
-              :path "/Users/tristan/data/genegraph-neo/gv_tdb"}}
-   :processors {:base-processor
-                {:subscribe :base
-                 :initial-events gene-validity-initialization-events
-                 :interceptors `[base/load-base-data-interceptor]}}})
+   :topics {:gene-validity-raw-dev {:initial-events}
+            :gene-valdity-raw-kafka {
+                                     #_#_#_#_:kafka-cluster :dx-ccloud
+                                     :kafka-topic "gene_validity_raw"}
+            :gene-validity-rdf {}}
+   :storage {:last-gene-validity-records
+             {:type :rocksdb
+              :path "/Users/tristan/data/genegraph-neo/last_gene_validity_records"}
+             :gene-validity-raw-events
+             {:type :rocksdb
+              :path "/Users/tristan/data/genegraph-neo/gene_validity_raw_events"}}
+   :processors {:gene-validity-processor
+                {:subscribe :gene-validity-raw-dev
+                 :interceptors `[base/load-base-data-interceptor]} }})
 
 
 (comment

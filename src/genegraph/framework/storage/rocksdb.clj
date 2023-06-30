@@ -5,7 +5,9 @@
             [clojure.java.io :as io]
             [digest])
   (:import (org.rocksdb Options ReadOptions RocksDB Slice CompressionType)
-           java.util.Arrays))
+           java.util.Arrays
+           java.nio.ByteBuffer
+           java.io.ByteArrayOutputStream))
 
 
 
@@ -36,12 +38,33 @@
           :state (atom :stopped)
           :instance (atom nil))))
 
-(defn key-digest
-  "Return a byte array of the md5 hash of the nippy frozen object"
-  [k]
+(def array-of-bytes-type (Class/forName "[B"))
+
+(defmulti key-to-byte-array class)
+
+(defmethod key-to-byte-array array-of-bytes-type [k] k)
+
+(defmethod key-to-byte-array java.lang.Long [k]
+  (-> (ByteBuffer/allocate (java.lang.Long/BYTES))
+      (.putLong k)
+      .array))
+
+(defmethod key-to-byte-array clojure.lang.PersistentVector [k]
+  (let [bs (ByteArrayOutputStream.)]
+    (run! #(.writeBytes bs %) (map key-to-byte-array k))
+    (.toByteArray bs)))
+
+(defmethod key-to-byte-array :default [k]
   (-> k nippy/fast-freeze digest/md5 .getBytes))
 
-(defn range-upper-bound
+(comment
+  (key-to-byte-array 123456788)
+  (key-to-byte-array "this")
+  (key-to-byte-array {:an :object})
+  (key-to-byte-array [1 2 3])
+  )
+
+(defn prefix-range-end
   "Return the key defining the (exclusive) upper bound of a scan,
   as defined by RANGE-KEY"
   [^bytes range-key]
@@ -49,159 +72,42 @@
     (doto (Arrays/copyOf range-key (alength range-key))
       (aset-byte last-byte-idx (inc (aget range-key last-byte-idx))))))
 
-(defn- key-tail-digest
-  [k]
-  (-> k nippy/fast-freeze digest/md5 .getBytes range-upper-bound))
+(comment
+  (prefix-range-end (key-to-byte-array 3))
+  )
 
-(defn multipart-key-digest [ks]
-  (->> ks (map #(-> % nippy/fast-freeze digest/md5)) (apply str) .getBytes))
+(defn destroy [path]
+  (with-open [opts (Options.)]
+    (RocksDB/destroyDB path opts)))
 
-(defn rocks-put!
-  "Put v in db with key k. Key will be frozen with md5 hash.
-   Suitable for keys large and small with arbitrary Clojure data,
-   but breaks any expectation of ordering. Value will be frozen,
-   supports arbitrary Clojure data."
-  [db k v]
-  (.put db (key-digest k) (nippy/fast-freeze v)))
+(defn range-get
+  "In order to limit the potential for memory leaks, this returns a
+  PersistentVector and handles all the lifecycle operations for the
+  required RocksDB entities."
+  ([db prefix]
+   (let [ba (key-to-byte-array prefix)]
+     (range-get db ba (prefix-range-end ba))))
+  ([db start end]
+   (with-open [slice (Slice. (key-to-byte-array end))
+               opts (.setIterateUpperBound (ReadOptions.) slice)
+               iter (.newIterator db opts)]
+     (.seek iter (key-to-byte-array start))
+     (loop [v (transient [])]
+       (if (.isValid iter)
+         (let [v1 (conj! v (nippy/fast-thaw (.value iter)))]
+           (.next iter)
+           (recur v1))
+         (persistent! v))))))
 
-(defn rocks-put-raw-key!
-  "Put v in db with key k. Key will be used without freezing and must be
-   a Java byte array. Intended to support use cases where the user must
-   be able to define the ordering of data. Value will be frozen."
-  [db k v]
-  (.put db k (nippy/fast-freeze v)))
+(defn rocks-write! [^RocksDB db k v]
+  (.put db
+        (key-to-byte-array k)
+        (nippy/fast-freeze v)))
 
-(defn rocks-get-raw-key
-  "Retrieve data that has been stored with a byte array defined key. K must be a
-  Java byte array."
-  [db k]
-  (if-let [result (.get db k)]
+(defn rocks-get [db k]
+  (if-let [result (.get db (key-to-byte-array k))]
     (nippy/fast-thaw result)
-    ::miss))
-
-(defn rocks-put-multipart-key!
-  "ks is a sequence, will hash each element in ks independently to support
-   range scans based on different elements of the key"
-  [db ks v]
-  (.put db (multipart-key-digest ks) (nippy/fast-freeze v)))
-
-(defn rocks-delete! [db k]
-  (.delete db (key-digest k)))
-
-(defn rocks-delete-raw-key!
-  "Delete a key."
-  [db k]
-  (.delete db k))
-
-(defn rocks-delete-multipart-key! [db ks]
-  (.delete db (multipart-key-digest ks)))
-
-#_(defn rocks-destroy!
-  "Delete the named instance. Database must be closed prior to this call.
-   If db-name is a RocksDB object, this closes it, destroys it, re-opens it"
-  [db-name]
-  (cond
-    (instance? org.rocksdb.RocksDB db-name) (let [name-str (.getName db-name)]
-                                              (.close db-name)
-                                              (rocks-destroy! name-str)
-                                              (open name-str))
-    :else (RocksDB/destroyDB (create-db-path db-name) (Options.))))
-
-(defn rocks-get
-  "Get and nippy/fast-thaw element with key k. Key may be any arbitrary Clojure datatype"
-  [db k]
-  (if-let [result (.get db (key-digest k))]
-    (nippy/fast-thaw result)
-    ::miss))
-
-(defn rocks-get-multipart-key
-  "Get and nippy/fast-thaw element with key sequence ks. ks is a sequence of
-  arbitrary Clojure datatypes."
-  [db ks]
-  (if-let [result (.get db (multipart-key-digest ks))]
-    (nippy/fast-thaw result)
-    ::miss))
-
-(defn rocks-delete-with-prefix!
-  "use RocksDB.deleteRange to clear keys starting with prefix"
-  [db prefix]
-  (.deleteRange db (key-digest prefix) (key-tail-digest prefix)))
-
-(defn close
-  "Close the database"
-  [db]
-  (.close db))
-
-(defn raw-prefix-iter
-  [db prefix]
-  (doto (.newIterator db
-                      (.setIterateUpperBound (ReadOptions.)
-                                             (Slice. (range-upper-bound prefix))))
-    (.seek prefix)))
-
-(defn prefix-iter
-  "return a RocksIterator that covers records with prefix"
-  [db prefix]
-  (raw-prefix-iter db (key-digest prefix)))
-
-(defn entire-db-iter
-  "return a RocksIterator that iterates over the entire database"
-  [db]
-  (doto (.newIterator db)
-    (.seekToFirst)))
-
-(defn rocks-iterator-seq [iter]
-  (lazy-seq
-   (if (.isValid iter)
-     (let [v (nippy/fast-thaw (.value iter))]
-       (.next iter)
-       (cons v
-             (rocks-iterator-seq iter)))
-     nil)))
-
-(defn rocks-entry-iterator-seq [^org.rocksdb.RocksIterator iter]
-  (lazy-seq
-   (if (.isValid iter)
-     (let [k (.key iter)
-           v (nippy/fast-thaw (.value iter))]
-       (.next iter)
-       (cons [k v]
-             (rocks-entry-iterator-seq iter)))
-     nil)))
-
-(defn entire-db-entry-seq [^RocksDB db]
-  (-> db entire-db-iter rocks-entry-iterator-seq))
-
-(defn prefix-seq
-  "Return a lazy-seq over all records beginning with prefix"
-  [db prefix]
-  (-> db (prefix-iter prefix) rocks-iterator-seq))
-
-(defn entire-db-seq
-  "Return a lazy-seq over all records in the database"
-  [db]
-  (-> db entire-db-iter rocks-iterator-seq))
-
-(defn raw-prefix-seq
-  "Return a lazy-seq over all records in DB beginning with PREFIX,
-  where prefix is a byte array. Intended when record ordering
-  is significant."
-  [db prefix]
-  (-> db (raw-prefix-iter prefix) rocks-iterator-seq))
-
-(defn sample-prefix
-  "Take first n records from db given prefix"
-  [db prefix n]
-  (let [iter (prefix-iter db prefix)]
-    (loop [i 0
-           ret (transient [])]
-      (if (and (< i n) (.isValid iter))
-        (let [new-ret (conj! ret (-> iter .value nippy/fast-thaw))]
-          (.next iter)
-          (recur (inc i) new-ret))
-        (do
-          (.close iter)
-          (persistent! ret))))))
+    ::storage/miss))
 
 (extend RocksDB
   
@@ -209,35 +115,72 @@
   {:write
    (fn
      ([this k v]
-      (rocks-put! this k v))
+      (rocks-write! this k v))
      ([this k v commit-promise]
-      (rocks-put! this k v)
+      (rocks-write! this k v)
       (deliver commit-promise true)))}
 
   storage/IndexedRead
   {:read rocks-get}
 
+  storage/IndexedDelete
+  {:delete (fn [this k] (.delete this (key-to-byte-array k)))}
+
+  storage/RangeRead
+  {:scan range-get}
+
+  storage/RangeDelete
+  {:range-delete
+   (fn
+     ([this prefix]
+      (let [kb (key-to-byte-array prefix)]
+        (.deleteRange this kb (prefix-range-end kb))))
+     ([this start end]
+      (.deleteRange this
+                    (key-to-byte-array start)
+                    (key-to-byte-array end))))}
+
   ;; Consider sing other keys, or multipart keys if other storage facts
   ;; needed. Also may need 
-  p/TopicBackingStore
+  #_#_p/TopicBackingStore
   {:store-offset
    (fn [this topic offset]
-     (rocks-put! this topic offset))
+     (rocks-write! this topic offset))
    :retrieve-offset
    (fn [this topic]
-     (rocks-get this topic))})
+     (rocks-get this topic))}
+  )
+
+(comment 
+
+  (with-open [db (open "/users/tristan/desktop/test-rocks")]
+    (storage/write db :test :value)
+    (storage/read db :test))
+
+  (with-open [db (open "/users/tristan/desktop/test-rocks")]
+    (storage/write db :test :value)
+    (storage/delete db :test)
+    (storage/read db :test))
 
 
+  (with-open [db (open "/users/tristan/desktop/test-rocks")]
+    (storage/write db 1 :one)
+    (storage/write db 2 :two)
+    (storage/write db 3 :three)
+    (storage/scan db 1 3))
 
-#_(with-open [db (open "/users/tristan/desktop/test-rocks")]
-  (storage/write db :test :value))
+  (with-open [db (open "/users/tristan/desktop/test-rocks")]
+    (storage/write db [:one :two] :onetwo)
+    (storage/write db [:one :three] :onethree)
+    (storage/write db [:four :five] :fourfive)
+    (storage/scan db :one))
 
-#_(with-open [db (open "/users/tristan/desktop/test-rocks")]
-  (p/store-offset db :test123 123 ))
+  (with-open [db (open "/users/tristan/desktop/test-rocks")]
+    (storage/write db [:one :two] :onetwo)
+    (storage/write db [:one :three] :onethree)
+    (storage/write db [:four :five] :fourfive)
+    (storage/range-delete db :one)
+    (storage/scan db :one))
+  )
 
-#_(with-open [db (open "/users/tristan/desktop/test-rocks")]
-  (p/retrieve-offset db :test123))
-
-#_(with-open [db (open "/users/tristan/desktop/test-rocks")]
-  (storage/get db :test))
 

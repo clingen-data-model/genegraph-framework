@@ -1,7 +1,8 @@
 (ns genegraph.framework.topic
   "Defines the logic for handling topics"
   (:require [clojure.spec.alpha :as spec]
-            [genegraph.framework.protocol :as p])
+            [genegraph.framework.protocol :as p]
+            [genegraph.framework.storage :as storage])
   (:import  [java.util.concurrent BlockingQueue ArrayBlockingQueue TimeUnit]
             [java.util List ArrayList Properties]
             [java.time Duration]
@@ -44,7 +45,8 @@
                   queue
                   consumer
                   kafka-cluster
-                  state]
+                  state
+                  initial-events]
   
   p/Lifecycle
   (start [this]

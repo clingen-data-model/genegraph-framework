@@ -14,7 +14,9 @@
 
   By default includes functionality for a circuit breaker:
   processing will slow or be completely interrupted if there are errors
-  in the stream processing"
+  in the stream processing.
+
+  Best practice is for a processor to be dedicated to a single endpoint."
   
   (:require [hato.client :as hc]
             [genegraph.framework.protocol :as p]
@@ -56,6 +58,16 @@
                  (get-in event [::result :body]))
     event))
 
+(defn publish-notification [event]
+  (event/publish
+   event
+   (get-in event [::event/data :notification-topic])
+   {::event/key (storage-key event)
+    ::event/data (assoc (:notification-event event)
+                        :location
+                        (storage-key event))
+    ::event/format :edn}))
+
 (comment
 
   (def test-app
@@ -71,7 +83,8 @@
       {:remote-request
        {:interceptors `[exec-http
                         examine-result-for-error
-                        store-result]
+                        store-result
+                        publish-notification]
         :subscribe :request
         ::event/metadata {::http-method :get
                           ::store :gcs
@@ -94,11 +107,14 @@
       deref
       (storage/write "test-file-2.txt" (clojure.java.io/input-stream
                                         "/users/tristan/desktop/test.txt")))
+
+  
   (genegraph.framework.processor/process-event
    (-> test-app :processors deref :remote-request)
    {::event/key "k"
     ::event/value (pr-str
-                   {:resource "/1999/02/22-rdf-syntax-ns.ttl"})
+                   {:resource "/1999/02/22-rdf-syntax-ns.ttl"
+                    :notification-topic :result})
     ::event/metadata {::event/format :edn
                       ::endpoint "http://www.w3.org"}})
 

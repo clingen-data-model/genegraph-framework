@@ -9,6 +9,8 @@
 
 (defmulti deserialize ::format)
 
+(defmulti serialize ::format)
+
 ;; just return event if serialization not defined
 (defmethod deserialize :default [event]
   event)
@@ -18,6 +20,15 @@
 
 (defmethod deserialize :edn [event]
   (assoc event ::data (edn/read-string (::value event))))
+
+(defmethod serialize :default [event]
+  event)
+
+(defmethod serialize :json [event]
+  (assoc event ::value (json/write-str (::data event))))
+
+(defmethod serialize :edn [event]
+  (assoc event ::value (pr-str (::data event))))
 
 (defn store
   "Add deferred write effect to event"
@@ -31,3 +42,10 @@
              :commit-promise commit-promise})))
 
 
+(defn publish [event topic publish-event]
+  "add deferred publish effect to event"
+  (update event
+          :publish-events
+          conj
+          {:topic topic
+           :event publish-event}))
