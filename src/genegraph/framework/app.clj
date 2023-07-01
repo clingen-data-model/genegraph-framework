@@ -93,7 +93,7 @@
   app)
 
 (defn test-interceptor-fn [event]
-  (println "the value be" (::event/value event))
+  (println "the type be" (type event))
   event)
 
 ;; TODO should just write a function to construct
@@ -129,8 +129,8 @@
                                 "org.apache.kafka.common.serialization.StringSerializer"
                                 "value.serializer"
                                 "org.apache.kafka.common.serialization.StringSerializer"}}}
-   :topics {:test-topic {}
-            #_{:kafka-cluster :dx-ccloud
+   :topics {:test-topic 
+            {:kafka-cluster :dx-ccloud
              :kafka-topic "actionability"}}
    :storage {:test-rocksdb
              {:type :rocksdb

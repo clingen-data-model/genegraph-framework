@@ -2,7 +2,8 @@
   "Defines the logic for handling topics"
   (:require [clojure.spec.alpha :as spec]
             [genegraph.framework.protocol :as p]
-            [genegraph.framework.storage :as storage])
+            [genegraph.framework.storage :as storage]
+            [genegraph.framework.event :as event])
   (:import  [java.util.concurrent BlockingQueue ArrayBlockingQueue TimeUnit]
             [java.util List ArrayList Properties]
             [java.time Duration]
@@ -22,6 +23,14 @@
   {:timeout 1000
    :buffer-size 100})
 
+(defn consumer-record->clj [record]
+  {::event/key (.key record)
+   ::event/value (.value record)
+   ::event/timestamp (.timestamp record)
+   ::event/kafka-topic (.topic record)
+   ::event/source :kafka
+   ::event/offset (.offset record)})
+
 (defn- start-kafka-consumer [topic]
   (let [topic-partitions [(TopicPartition. (:kafka-topic topic) 0)]
         consumer (doto (KafkaConsumer.
@@ -37,7 +46,8 @@
                (->> (.poll consumer (Duration/ofMillis 100))
                     .iterator
                     iterator-seq
-                    (run! #(p/offer topic %)))))))))
+                    (run! #(p/offer topic
+                                    (consumer-record->clj %))))))))))
 
 (defrecord Topic [name
                   buffer-size
@@ -99,7 +109,9 @@
       (->> (.poll c (Duration/ofMillis 100))
            .iterator
            iterator-seq
-           count))))
+           count)
+
+      )))
 
 #_(spec/explain ::topic {::aname :test})
 

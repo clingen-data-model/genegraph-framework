@@ -21,7 +21,7 @@
                                 "org.apache.kafka.common.serialization.StringSerializer"
                                 "value.serializer"
                                 "org.apache.kafka.common.serialization.StringSerializer"}}}
-   :topics {:gene-validity-raw-dev {:initial-events}
+   :topics {:gene-validity-raw-dev {:initial-events []}
             :gene-valdity-raw-kafka {
                                      #_#_#_#_:kafka-cluster :dx-ccloud
                                      :kafka-topic "gene_validity_raw"}
@@ -43,7 +43,7 @@
   (p/stop gv)
   (keys gv)
   (p/offer (:base  @(:topics gv))
-           {::base/data-path "/Users/tristan/data/genegraph-neo/base"
+           {:base/data-path "/Users/tristan/data/genegraph-neo/base"
             :value (first gene-validity-initialization-events)})
   (:base @(:topics gv))
   (let [tdb @(:instance (:gene-validity-tdb  @(:storage gv)))]
