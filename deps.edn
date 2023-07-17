@@ -11,16 +11,22 @@
  :deps
  {org.clojure/clojure                               {:mvn/version "1.11.1"}
 
+  ;; may want to consider logging at some point...
+  org.slf4j/slf4j-simple                            {:mvn/version "2.0.7"}
+
   ;; Interceptors and HTTP server
-  io.pedestal/pedestal.jetty                        {:mvn/version "0.5.10"}
-  io.pedestal/pedestal.service                      {:mvn/version "0.5.10"}
+  io.pedestal/pedestal.jetty                        {:mvn/version "0.6.0"}
+  io.pedestal/pedestal.route                        {:mvn/version "0.6.0"}
+  io.pedestal/pedestal.service                      {:mvn/version "0.6.0"}
   org.clojure/core.async                            {:mvn/version "1.6.673"} ; update for pedestal
+
+  com.walmartlabs/lacinia-pedestal                  {:mvn/version "1.2"}
   
   ;; Serialization
   com.taoensso/nippy                                {:mvn/version "3.2.0"}
   digest/digest                                     {:mvn/version "1.4.10"}
 
-  org.apache.kafka/kafka-clients                    {:mvn/version "3.4.0"}
+  org.apache.kafka/kafka-clients                    {:mvn/version "3.5.0"}
 
   ;; Datastores
   

@@ -1,9 +1,10 @@
-(ns genegraph.gene-validity.deserialize
+(ns genegraph.gene-validity.gci-model
   (:require [genegraph.framework.storage.rdf :as rdf]
+            [genegraph.framework.event :as event]
             [clojure.string :as s]
             [clojure.walk :refer [postwalk]]
             [clojure.edn :as edn]
-            [cheshire.core :as json])
+            [clojure.data.json :as json])
   (:import [java.io ByteArrayInputStream]))
 
 (def base "http://dataexchange.clinicalgenome.org/gci/")
@@ -27,7 +28,7 @@
 (def context
   (s/join ""
         (drop-last
-         (json/generate-string
+         (json/write-str
           {"@context" 
            {
             ;; frontmatter
@@ -242,18 +243,18 @@
 
 (defn preprocess-json
   "Walk GCI JSON prior to parsing as JSON-LD to clean up data."
-  [gci-json]
-  (->> (json/parse-string gci-json)
-       (postwalk #(-> %
-                      clear-associated-snapshots
-                      fix-hpo-ids
-                      expand-affiliation-to-iri
-                      (remove-keys-when-empty ["geneWithSameFunctionSameDisease"
-                                               "normalExpression"
-                                               "scores"
-                                               "carId"
-                                               "clinvarVariantId"])))
-       json/generate-string))
+  [data]
+  (json/write-str
+   (postwalk #(-> %
+                  clear-associated-snapshots
+                  fix-hpo-ids
+                  expand-affiliation-to-iri
+                  (remove-keys-when-empty ["geneWithSameFunctionSameDisease"
+                                           "normalExpression"
+                                           "scores"
+                                           "carId"
+                                           "clinvarVariantId"]))
+             data)))
 
 (defn fix-gdm-identifiers [gdm-json]
   (-> gdm-json
@@ -270,10 +271,10 @@
 (defn append-context [gdm-json]
   (str context "," (subs gdm-json 1)))
 
-(defn deserialize [event]
+(defn add-gci-model [event]
   (assoc event
-         :data
-         (-> (:value event)
+         :gene-validity/gci-model
+         (-> (::event/data event)
              preprocess-json
              fix-gdm-identifiers
              append-context
@@ -281,10 +282,4 @@
              ByteArrayInputStream.
              (rdf/read-rdf {:format :json-ld}))))
 
-(comment
- (-> "/Users/tristan/data/genegraph/2023-01-17T1950/events/:gci-raw-missing-data/1ec53217-814e-44b3-a7b7-0f18311c20f3.json.edn"
-     slurp
-     edn/read-string
-     (update-keys #(keyword (name %)))
-     deserialize
-     keys))
+

@@ -1,4 +1,5 @@
 (ns genegraph.framework.storage
+  (:require [clojure.java.io :as io])
   (:refer-clojure :exclude [read]))
 
 (defprotocol IndexedWrite
@@ -20,22 +21,19 @@
 (defprotocol RangeDelete
   (range-delete [this prefix] [this begin end]))
 
-#_(defn store
-  "Add deferred write effect to event"
-  [event instance k v]
-  (let [commit-promise (promise)]
-    (update event
-            :effects
-            conj
-            {:command write
-             :args [(get-in event [::storage instance]) k v commit-promise]
-             :commit-promise commit-promise})))
+(defprotocol TopicBackingStore
+  (store-offset [this topic offset])
+  (retrieve-offset [this topic]))
+
+(defmulti as-handle :type)
+
+(defmethod as-handle :file [def]
+  (io/file (:base def) (:path def)))
 
 (comment
-  (store {::storage {:some-storage 'some-storage}} :some-storage :key "value")
-  )
-
-
+  (as-handle {:type :file
+              :base "/users/tristan/data"
+              :path "edntest.edn"}))
 
 ;; write (key-value)
 ;; get (key)

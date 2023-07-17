@@ -97,6 +97,24 @@
     (slurp ic))
   )
 
+
+(defn list-items-in-bucket
+  ([bucket] (list-items-in-bucket bucket nil))
+  ([bucket prefix]
+   (let [options (if prefix
+                   (into-array [(Storage$BlobListOption/prefix prefix)])
+                   (make-array Storage$BlobListOption 0))]
+     (-> (.list (storage)
+                bucket
+                options)
+         .iterateAll
+         .iterator
+         iterator-seq))))
+(comment
+  (list-items-in-bucket "genegraph-framework-dev" "test")
+
+  )
+
 (defrecord GCSBucket [bucket]
 
   ;; key is expected to be reasonable blob ID,
@@ -114,6 +132,15 @@
   storage/IndexedRead
   (read [this k]
     (open-input-stream-on-bucket-object bucket k))
+
+  storage/RangeRead
+  (scan [this prefix]
+    (list-items-in-bucket bucket prefix))
+  ;; Not supporting the 'end' part of this at the moment
+  ;; this is currently only needed for a special use case anyawy.
+  (scan [this begin end]
+    (storage/scan this begin))
+  
   
   )
 
@@ -155,6 +182,62 @@
           :state (atom :stopped)
           :instance (atom (map->GCSBucket bucket-def)))))
 
+(extend-type Blob
+  io/IOFactory
+  (io/make-input-stream [this opts]
+    (-> this
+        (.reader (make-array Blob$BlobSourceOption 0))
+        Channels/newInputStream))
+  (io/make-output-stream [this opts]
+    (-> this
+        (.writer (make-array Storage$BlobWriteOption 0))
+        Channels/newOutputStream))
+  (io/make-reader [this opts]
+    (-> this
+        (.reader (make-array Blob$BlobSourceOption 0))
+        (Channels/newReader StandardCharsets/UTF_8)))
+  (io/make-writer [this opts]
+        (-> this
+        (.writer (make-array Storage$BlobWriteOption 0))
+        (Channels/newWriter StandardCharsets/UTF_8))))
+
+
+(defmethod storage/as-handle :gcs [def]
+  (.get (storage)
+        (BlobId/of (:bucket def)
+                   (str (:base def)
+                        (:path def)))))
+
+(comment
+  (slurp
+   (storage/as-handle {:type :gcs
+                       :bucket "genegraph-framework-dev"
+                       :path "test.txt"}))
+  (def s (slurp
+          (storage/as-handle {:type :gcs
+                              :bucket "genegraph-framework-dev"
+                              :base "current-base/"
+                              :path "affiliations.csv"})))
+
+  (def b (p/init {:type :gcs-bucket
+                  :name :dev-bucket
+                  :bucket "genegraph-framework-dev"}))
+  (p/start b)
+  (p/stop b)
+  (storage/read @(:instance b) )
+  (->> (storage/scan @(:instance b) "test")
+       first
+       io/reader
+       slurp)
+
+  (-> (storage/scan @(:instance b) "test")
+      first
+      io/writer
+      (spit "this is another modified test file"))
+
+  
+  )
+
 ;; Functions below waiting for a use case in genegraph-framework
 ;; may want to handle channel functions at some point
 
@@ -164,19 +247,6 @@
   [^WritableByteChannel channel ^String input-string]
   (.write channel (ByteBuffer/wrap (.getBytes input-string StandardCharsets/UTF_8)))
   channel)
-
-#_(defn list-items-in-bucket
-  ([] (list-items-in-bucket nil))
-  ([prefix]
-   (let [options (if prefix
-                   (into-array [(Storage$BlobListOption/prefix prefix)])
-                   (make-array Storage$BlobListOption 0))]
-     (-> (.list (storage)
-                env/genegraph-bucket
-                options)
-         .iterateAll
-         .iterator
-         iterator-seq))))
 
 #_(defn get-files-with-prefix!
   "Store all files in bucket matching PREFIX to TARGET-DIR"

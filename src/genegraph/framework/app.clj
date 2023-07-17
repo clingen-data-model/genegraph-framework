@@ -93,16 +93,13 @@
   app)
 
 (defn test-interceptor-fn [event]
-  (println "the type be" (type event))
+  (println "the key be " (::event/key event))
   event)
 
 ;; TODO should just write a function to construct
 ;; an interceptor with a function reference
 ;; mostly want to offer a level of indirection
 ;; given a function reference
-
-(def test-interceptor
-  {:enter (fn [e] (test-interceptor-fn e))})
 
 #_(def test-interceptor
   {:enter
@@ -111,6 +108,11 @@
      (clojure.pprint/pprint (s/read (get-in e [::s/storage :test-rocksdb]) :test))
      e
      #_(update e :effects conj [:global :test-rocksdb s/write (:key e) (:value e)]))})
+
+(def test-events
+  [{::event/key "e1"
+    ::event/value (pr-str {:test :event})
+    ::event/format :edn}])
 
 (def app-def
   {:kafka-clusters {:dx-ccloud
@@ -129,9 +131,13 @@
                                 "org.apache.kafka.common.serialization.StringSerializer"
                                 "value.serializer"
                                 "org.apache.kafka.common.serialization.StringSerializer"}}}
-   :topics {:test-topic 
-            {:kafka-cluster :dx-ccloud
-             :kafka-topic "actionability"}}
+   :topics {:test-topic
+            {:initial-events {:type :gcs
+                              :bucket "genegraph-framework-dev"
+                              :path "gene_validity_initial_events.edn.gz"}
+             :kafka-cluster :dx-ccloud
+             :kafka-topic "actionability"
+             :start-kafka true}}
    :storage {:test-rocksdb
              {:type :rocksdb
               :path "/users/tristan/desktop/test-rocks"}}
@@ -140,10 +146,22 @@
                  :interceptors `[test-interceptor-fn]}}})
 
 (comment
+  {:type :file
+   :base "/users/tristan/data/genegraph-neo/"
+   :path "gene_validity_initial_events.edn.gz"}
+  
+  (.exists (s/as-handle {:type :file
+                         :base "/Users/tristan/data/genegraph-neo"
+                         :path "gene_validity_initial_events.edn.gz"}))
+  
   (def a (create app-def))
   (p/start a)
+  (p/stop a)
+
+  (first (cons :a [:b :c]))
+  
   (:topics a)
-  (-> a :topics deref :test-topic (p/offer {:key :k :value :v}))
+  (-> a :topics deref :test-topic )
   (-> a
       :processors
       deref
@@ -159,6 +177,6 @@
                                 ::event/value "{:object \"value\"}"
                                 ::event/metadata {::event/format :edn}}))
   
-  (p/stop a)
+
   (-> a :topics deref :test-topic (p/offer {:key :test :value "bork"}))
   @(:topics a))

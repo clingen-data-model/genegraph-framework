@@ -32,10 +32,12 @@
   (interceptor/interceptor
    {:name ::storage-interceptor
     :enter (fn [event]
-             (assoc event
-                    ::s/storage
-                    (update-vals @(:storage processor)
-                                 (fn [s] @(:instance s)))))
+             (if (:storage processor)
+               (assoc event
+                      ::s/storage
+                      (update-vals @(:storage processor)
+                                   (fn [s] @(:instance s))))
+               event))
     :leave (fn [event]
              (try
                (run! (fn [{:keys [store command args commit-promise]}]
@@ -56,9 +58,11 @@
   (interceptor/interceptor
    {:name ::publish-interceptor
     :enter (fn [event]
-             (assoc event
-                    ::event/topics
-                    @(:topics processor)))
+             (if (:topics processor)
+               (assoc event
+                      ::event/topics
+                      @(:topics processor))
+               event))
     :leave (fn [event]
 
              event)}))

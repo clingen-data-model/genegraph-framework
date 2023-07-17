@@ -137,13 +137,15 @@ where {
 
   ?individual gci:method ?method .
 
-  OPTIONAL {
-    ?method gci:genotypingMethods/rdf:rest{0}/rdf:first ?firstTestingMethod .
-  }
+  ## TODO these fail to parse, fix
 
-  OPTIONAL {
-    ?method gci:genotypingMethods/rdf:rest{1}/rdf:first ?secondTestingMethod .
-  }
+  # OPTIONAL {
+  #   ?method gci:genotypingMethods/rdf:rest{0}/rdf:first ?firstTestingMethod .
+  # }
+
+  # OPTIONAL {
+  #   ?method gci:genotypingMethods/rdf:rest{1}/rdf:first ?secondTestingMethod .
+  # }
 
   OPTIONAL {
     ?method gci:previousTesting ?prevTesting .
