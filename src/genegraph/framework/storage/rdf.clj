@@ -98,6 +98,17 @@
              (filter second ; remove when no mapping exists
                      (concat predicate-iri-kw object-iri-kw))))))
 
+
+(defn difference
+  "Return the model representing the elements in MODEL-ONE not in MODEL-TWO"
+  [^Model model-one ^Model model-two]
+  (.difference model-one model-two))
+
+(defn is-isomorphic?
+  "Return true if MODEL-ONE is isomorphic relative to MODEL-TWO"
+  [^Model model-one ^Model model-two]
+  (.isIsomorphicWith model-one model-two))
+
 (comment
 
  (def m (read-rdf 

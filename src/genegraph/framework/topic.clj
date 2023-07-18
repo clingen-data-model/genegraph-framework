@@ -16,6 +16,10 @@
             [org.apache.kafka.clients.producer KafkaProducer Producer ProducerRecord]
             [org.apache.kafka.common PartitionInfo TopicPartition KafkaFuture]))
 
+;; TODO start here tomorrow
+;; Think about how to handle topics appropriately, consult notes
+;; implement modal topics, see modality
+
 (def topic-defaults
   {:timeout 1000
    :buffer-size 100})
@@ -52,6 +56,11 @@
            (map #(assoc % ::event/topic-name (:name topic)))
            (run! #(p/offer topic %))))))
 
+(defn- start-kafka-producer [topic]
+  (reset! (:producer topic)
+          (KafkaProducer. (merge (get-in topic [:kafka-cluster :common])
+                                 (get-in topic [:kafka-cluster :producer])))))
+
 (defn event-seq-from-storage [def]
   (->> (storage/scan (:instance def) (:path def))
        (map #(-> % io/reader PushbackReader. edn/read))))
@@ -68,8 +77,6 @@
   )
 
 (defn- offer-initial-events-from-input [topic input]
-  (println "offer initial events from input")
-  (println input)
   (event-store/with-event-reader [r input]
     (loop [offset 0
            initial-events (event-store/event-seq r)]
@@ -85,8 +92,7 @@
                         :initial-events
                         ::event/topic-name
                         (:name topic)))
-        (recur (inc offset) (rest initial-events)))))
-  (println "initial events from input complete"))
+        (recur (inc offset) (rest initial-events))))))
 
 (defn- offer-initial-events-from-seq [topic es]
   (loop [offset 0
@@ -102,8 +108,6 @@
                       (:name topic)))
       (recur (inc offset) (rest initial-events)))))
 
-(sequential? {:a :thing})
-
 (defn- offer-initial-events [topic]
   (let [e (:initial-events topic)]
     (cond
@@ -113,13 +117,13 @@
   (reset! (:initial-events-complete topic) true))
 
 (defn- start-topic [topic]
-  (reset! (:state topic) :running)
   (.start
    (Thread.
     (fn []
       (offer-initial-events topic)
       (when (and (:run-kafka-consumer topic)
-                 (:kafka-topic topic))
+                 (:kafka-topic topic)
+                 (:kafka-cluster topic))
         (start-kafka-consumer topic))))))
 
 (defrecord Topic [name
@@ -139,8 +143,8 @@
   
   p/Lifecycle
   (start [this]
-    (when (and  (:kafka-cluster this) (:kafka-topic this))
-      (start-topic this)))
+    (reset! (:state this) :running)
+    (start-topic this))
   (stop [this]
     (reset! state :stopped))
 

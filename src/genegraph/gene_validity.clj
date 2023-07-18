@@ -4,10 +4,32 @@
             [genegraph.framework.event.store :as event-store]
             [genegraph.framework.processor :as processor]
             [genegraph.framework.event :as event]
+            [genegraph.framework.storage.rdf :as rdf]
             [genegraph.gene-validity.gci-model :as gci-model]
             [genegraph.gene-validity.sepio-model :as sepio-model]
             [clojure.java.io :as io]
             [clojure.edn :as edn]))
+
+
+(def prop-query
+  (rdf/create-query "select ?x where {?x a ?type}"))
+
+(defn add-action [event]
+  (assoc event
+         ::event/action
+         (if (re-find #"\"publishClassification\": ?true"
+                      (::event/value event))
+           :publish
+           :unpublish)))
+
+(defn add-iri [event]
+  (assoc event
+         ::event/iri
+         (-> (prop-query
+              (::event/model event)
+              {:type :sepio/GeneValidityProposition})
+             first
+             str)))
 
 (def gene-validity-genegraph-app
   {:kafka-clusters {:dx-ccloud
@@ -42,6 +64,16 @@
                 {:subscribe :gene-validity-raw-dev
                  :interceptors `[base/load-base-data-interceptor]} }})
 
+(def gene-validity-transform
+  (p/init
+   {:type :processor
+    :name :gene-validity-processor
+    :interceptors `[gci-model/add-gci-model
+                    sepio-model/add-model
+                    add-action
+                    add-iri]
+    ::event/metadata {::event/format :json}}))
+
 (comment
   (def gv-topic {:type :topic
                  :initial-events {:type :file
@@ -74,14 +106,6 @@
       (into [] (take 10 (event-store/event-seq r)))))
   
   (def e1 (first e))
-
-  (def p
-    (p/init
-     {:type :processor
-      :name :gene-validity-processor
-      :interceptors `[gci-model/add-gci-model
-                      sepio-model/add-model]
-      ::event/metadata {::event/format :json}}))
 
   (-> (processor/process-event p e1) ::event/model .size)
   
