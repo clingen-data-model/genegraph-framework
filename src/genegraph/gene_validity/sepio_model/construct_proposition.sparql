@@ -2,7 +2,7 @@ prefix gci: <http://dataexchange.clinicalgenome.org/gci/>
 construct 
 {
   ?gdm a :sepio/GeneValidityProposition . 
-  ?gdm :sepio/has-subject ?hgnc . # TODO change back to entrez at some point ?entrez_gene
+  ?gdm :sepio/has-subject ?hgnc .
   ?gdm :sepio/has-predicate :ro/IsCausalGermlineMutationIn .
   ?gdm :sepio/has-object ?disease .
   ?gdm :sepio/has-qualifier ?moi .

@@ -4,20 +4,13 @@
             [genegraph.framework.event :as event]
             [genegraph.gene-validity.names]))
 
-
-#_(def base "http://dataexchange.clinicalgenome.org/gci/")
-#_(def legacy-report-base "http://dataexchange.clinicalgenome.org/gci/legacy-report_")
-#_(def affbase "http://dataexchange.clinicalgenome.org/agent/")
-
 (def construct-params
   {:gcibase "http://dataexchange.clinicalgenome.org/gci/"
    :legacy_report_base "http://dataexchange.clinicalgenome.org/gci/legacy-report_"
-   #_#_:affiliation affiliation
    :arbase "http://reg.genome.network/allele/"
    :cvbase "https://www.ncbi.nlm.nih.gov/clinvar/variation/"
    :pmbase "https://pubmed.ncbi.nlm.nih.gov/"
-   :affbase "http://dataexchange.clinicalgenome.org/agent/"
-   #_#_:entrez_gene entrez-gene})
+   :affbase "http://dataexchange.clinicalgenome.org/agent/"})
 
 (rdf/declare-query construct-proposition
                    construct-evidence-level-assertion
@@ -46,6 +39,23 @@
                    unlink-segregations-when-no-proband-and-lod-scores
                    add-legacy-website-id)
 
+(def has-affiliation-query
+  "Query that returns a curations full affiliation IRI as a Resource.
+  Expects affiliations to have been preprocessed to IRIs from string form."
+  (rdf/create-query "prefix gci: <http://dataexchange.clinicalgenome.org/gci/>
+                   select ?affiliationIRI where {
+                     ?proposition a gci:gdm .
+                     OPTIONAL {
+                      ?proposition gci:affiliation ?gdmAffiliationIRI .
+                     }
+                     OPTIONAL {
+                      ?classification a gci:provisionalClassification .
+                      ?classification gci:affiliation ?classificationAffiliationIRI .
+                      ?classification gci:last_modified ?date .
+                     }
+                     BIND(COALESCE(?classificationAffiliationIRI, ?gdmAffiliationIRI) AS ?affiliationIRI) }
+                     ORDER BY DESC(?date) LIMIT 1"))
+
 (def initial-construct-queries
   [construct-proposition
    construct-evidence-level-assertion
@@ -71,11 +81,16 @@
    construct-ar-variant-score
    construct-unscoreable-evidence])
 
+(defn params-for-construct [event]
+  (assoc construct-params
+         :affiliation
+         (first (has-affiliation-query (:gene-validity/gci-model event)))))
+
 (defn add-model [event]
   (let [gci-model (:gene-validity/gci-model event)
         unlinked-model (apply
                         rdf/union
-                        (map #(% gci-model construct-params)
+                        (map #(% gci-model (params-for-construct event))
                              initial-construct-queries))
         pruned-model (-> unlinked-model
                          unlink-variant-scores-when-proband-scores-exist

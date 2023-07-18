@@ -3,6 +3,7 @@
             [clojure.pprint :refer [pprint]]
             [clojure.java.io :as io]
             [clojure.set :as s]
+            [clojure.data.json :as json]
             [genegraph.framework.event :as event]
             [genegraph.framework.event.store :as event-store]
             [genegraph.framework.storage.rdf :as rdf]
@@ -172,6 +173,20 @@
           (filter #(= "http://dataexchange.clinicalgenome.org/gci/e4ea022c-a24e-42dd-b7e6-62eccb391a4f"
                       (::event/iri %)))
           (into []))))
+
+ ((rdf/create-query "select ?x where { ?x <http://dataexchange.clinicalgenome.org/gci/publishClassification> ?o }")
+  (-> mras-events first :gene-validity/gci-model))
+
+ (rdf/pp-model (-> mras-events first :gene-validity/gci-model))
+ (rdf/pp-model (-> mras-events first ::event/model))
+
+ (with-open [w (io/writer "/users/tristan/desktop/mras.edn")]
+   (pprint (::event/data (first mras-events)) w))
+
+ (rdf/pp-model (->> mras-events
+                    first
+                    (processor/process-event gv/gene-validity-transform)
+                    ::event/model))
 
  (->> mras-events
       (map gv/add-iri)
