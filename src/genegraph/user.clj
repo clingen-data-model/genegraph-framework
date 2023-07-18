@@ -183,10 +183,28 @@
  (with-open [w (io/writer "/users/tristan/desktop/mras.edn")]
    (pprint (::event/data (first mras-events)) w))
 
- (rdf/pp-model (->> mras-events
-                    first
+ (rdf/pp-model (->> (nth znf-events 4)
                     (processor/process-event gv/gene-validity-transform)
                     ::event/model))
+ (spit
+  "/users/tristan/desktop/intermediate.json"
+  (->> (nth znf-events 4)
+       (processor/process-event gv/gene-validity-transform)
+       ::event/data
+       genegraph.gene-validity.gci-model/preprocess-json
+       genegraph.gene-validity.gci-model/fix-gdm-identifiers))
+
+  (-> (nth znf-events 4)
+      keys)
+ 
+ (type
+  (->> (nth znf-events 4)
+       (processor/process-event gv/gene-validity-transform)
+       ::event/data
+       genegraph.gene-validity.gci-model/preprocess-json
+       genegraph.gene-validity.gci-model/fix-gdm-identifiers))
+
+ (map ::event/action znf-models)
 
  (->> mras-events
       (map gv/add-iri)

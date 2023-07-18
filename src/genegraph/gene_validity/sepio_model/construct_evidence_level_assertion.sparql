@@ -18,6 +18,10 @@ construct {
   :bfo/realizes :sepio/ApproverRole ;
   :sepio/activity-date ?date .
 
+  ?publishContribution :sepio/has-agent ?affiliation ;
+  :bfo/realizes ?publishRole ;
+  :sepio/activity-date ?date .
+
   ?autoClassification a :sepio/GeneValidityEvidenceLevelAutoClassification ;
   :sepio/has-subject ?proposition ;
   :sepio/has-predicate :sepio/HasEvidenceLevel ;
@@ -32,8 +36,10 @@ where {
   gci:gene / gci:hgncId ?hgnc . # Adding path to gene to fix bug related to incomplete GDM
 
   ?classification a gci:provisionalClassification ;
-  gci:approvedClassification true ;
-  gci:publishClassification true ;
+  # TODO evaluate the effect of removing these
+  # Removing to attach unpublish action
+  # gci:approvedClassification true ;
+  # gci:publishClassification true ;
   gci:autoClassification ?autoEvidenceLevel ;
   gci:alteredClassification ?alteredEvidenceLevel ;
   gci:classificationPoints ?pointsTree .
@@ -80,6 +86,8 @@ where {
   BIND(IF(?alteredEvidenceLevel = gcixform:NoModification, ?autoEvidenceLevel, ?alteredEvidenceLevel) AS ?evidencelevel) .
 
   BIND(IRI(CONCAT(STR(?classification), "_contrib")) AS ?contribution ) .
+
+  BIND(IRI(CONCAT(STR(?classification), "_publish_contrib")) AS ?publishContribution ) .
 
   BIND(IRI(CONCAT(STR(?classification), "_auto_classification")) AS ?autoClassification ) .
   

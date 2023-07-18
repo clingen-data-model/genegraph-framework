@@ -260,7 +260,7 @@
   (-> gdm-json
       (s/replace #"MONDO_" "http://purl.obolibrary.org/obo/MONDO_")
       ;; New json-ld parser doesn't like '/' or parenthesis in terms 
-      (s/replace #"Exome/genome or all genes sequenced in linkage region"
+      (s/replace #"Exome\\/genome or all genes sequenced in linkage region"
                  "Exome genome or all genes sequenced in linkage region")
       ;; these are the interactionType MI codes only -  MI codes are used
       ;; in at least one other field in the json. Removing the MI code

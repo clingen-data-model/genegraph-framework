@@ -56,6 +56,11 @@
                      BIND(COALESCE(?classificationAffiliationIRI, ?gdmAffiliationIRI) AS ?affiliationIRI) }
                      ORDER BY DESC(?date) LIMIT 1"))
 
+(def is-publish-action-query
+  (rdf/create-query "prefix gci: <http://dataexchange.clinicalgenome.org/gci/>
+                      select ?classification where {
+                      ?classification gci:publishClassification true }" ))
+
 (def initial-construct-queries
   [construct-proposition
    construct-evidence-level-assertion
@@ -81,16 +86,27 @@
    construct-ar-variant-score
    construct-unscoreable-evidence])
 
+(defn publish-or-unpublish-role [event]
+  (let [res
+        (if (seq (is-publish-action-query (:gene-validity/gci-model event)))
+          :cg/PublisherRole
+          :cg/UnpublisherRole)]
+    (println res)
+    res))
+
 (defn params-for-construct [event]
   (assoc construct-params
          :affiliation
-         (first (has-affiliation-query (:gene-validity/gci-model event)))))
+         (first (has-affiliation-query (:gene-validity/gci-model event)))
+         :publishRole
+         (publish-or-unpublish-role event)))
 
 (defn add-model [event]
   (let [gci-model (:gene-validity/gci-model event)
+        params (params-for-construct event)
         unlinked-model (apply
                         rdf/union
-                        (map #(% gci-model (params-for-construct event))
+                        (map #(% gci-model params)
                              initial-construct-queries))
         pruned-model (-> unlinked-model
                          unlink-variant-scores-when-proband-scores-exist
