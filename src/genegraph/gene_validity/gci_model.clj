@@ -211,22 +211,22 @@
 (defn expand-affiliation-to-iri
   "Expand affiliation when a simple string field, to be an iri"
   [m]
-  (if (and (map? m) (get m "affiliation"))
-    (update m "affiliation" (fn [affiliation]
+  (if (and (map? m) (get m :affiliation))
+    (update m :affiliation (fn [affiliation]
                               (if (coll? affiliation)
                                 affiliation
                                 (str affbase affiliation))))
     m))
 
 (defn fix-hpo-ids [m]
-  (if (and (map? m) (get m "hpoIdInDiagnosis"))
-    (update m "hpoIdInDiagnosis" (fn [phenotypes]
+  (if (and (map? m) (get m :hpoIdInDiagnosis))
+    (update m :hpoIdInDiagnosis (fn [phenotypes]
                                    (mapv #(re-find #"HP:\d{7}" %)
                                          phenotypes)))
     m))
 
 (defn clear-associated-snapshots [m]
-  (if (map? m) (dissoc m "associatedClassificationSnapshots") m))
+  (if (map? m) (dissoc m :associatedClassificationSnapshots) m))
 
 (defn remove-keys-when-empty
   "When element is a map, removes any keys with key names from 'keys' vector that
@@ -249,11 +249,11 @@
                   clear-associated-snapshots
                   fix-hpo-ids
                   expand-affiliation-to-iri
-                  (remove-keys-when-empty ["geneWithSameFunctionSameDisease"
-                                           "normalExpression"
-                                           "scores"
-                                           "carId"
-                                           "clinvarVariantId"]))
+                  (remove-keys-when-empty [:geneWithSameFunctionSameDisease
+                                           :normalExpression
+                                           :scores
+                                           :carId
+                                           :clinvarVariantId]))
              data)))
 
 (defn fix-gdm-identifiers [gdm-json]
