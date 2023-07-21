@@ -2,7 +2,8 @@
   (:require [clojure.edn :as edn]
             [genegraph.framework.storage.rdf :as rdf]
             [genegraph.framework.event :as event]
-            [genegraph.gene-validity.names]))
+            [genegraph.gene-validity.names])
+  (:import [java.time Instant]))
 
 (def construct-params
   {:gcibase "http://dataexchange.clinicalgenome.org/gci/"
@@ -99,7 +100,9 @@
          :affiliation
          (first (has-affiliation-query (:gene-validity/gci-model event)))
          :publishRole
-         (publish-or-unpublish-role event)))
+         (publish-or-unpublish-role event)
+         :publishTime
+         (-> event ::event/timestamp Instant/ofEpochMilli str)))
 
 (defn add-model [event]
   (let [gci-model (:gene-validity/gci-model event)

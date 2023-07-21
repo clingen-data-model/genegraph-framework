@@ -20,7 +20,7 @@ construct {
 
   ?publishContribution :sepio/has-agent ?affiliation ;
   :bfo/realizes ?publishRole ;
-  :sepio/activity-date ?date .
+  :sepio/activity-date ?publishTime .
 
   ?autoClassification a :sepio/GeneValidityEvidenceLevelAutoClassification ;
   :sepio/has-subject ?proposition ;

@@ -4,13 +4,7 @@
             [genegraph.framework.storage :as s]
             [genegraph.framework.event :as event]
             [io.pedestal.interceptor :as interceptor]
-            [io.pedestal.interceptor.chain :as interceptor-chain]
-            [clojure.spec.alpha :as spec]))
-
-(spec/def ::processor
-  (spec/keys :req-un [::name ::subscribe]))
-
-(spec/def ::status #(:running :stopped))
+            [io.pedestal.interceptor.chain :as interceptor-chain]))
 
 (defn metadata-interceptor
   "Decorate the event with appropriate metadata by merging metadata from
@@ -118,14 +112,15 @@
   p/Lifecycle
   (start [this]
     (reset! (:state this) :running)
-    (.start
-     (Thread.
-      #(while (= :running @(:state this))
-         (try 
-           (when-let [event (p/poll (get-subscribed-topic this))]
-             (process-event this event))
-           (catch Exception e
-             (clojure.stacktrace/print-stack-trace e)))))))
+    (when subscribe
+      (.start
+       (Thread.
+        #(while (= :running @(:state this))
+           (try 
+             (when-let [event (p/poll (get-subscribed-topic this))]
+               (process-event this event))
+             (catch Exception e
+               (clojure.stacktrace/print-stack-trace e))))))))
   (stop [this]
     (reset! (:state this) :stopped)))
 

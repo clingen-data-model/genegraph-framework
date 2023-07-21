@@ -13,6 +13,7 @@
             [genegraph.gene-validity :as gv])
   (:import [java.io File PushbackReader FileOutputStream BufferedWriter FileInputStream BufferedReader]
            [java.nio ByteBuffer]
+           [java.time Instant]
            [java.util.zip GZIPInputStream GZIPOutputStream]))
 
 
@@ -195,7 +196,9 @@
        genegraph.gene-validity.gci-model/fix-gdm-identifiers))
 
   (-> (nth znf-events 4)
-      keys)
+      ::event/timestamp
+      Instant/ofEpochMilli
+      str)
  
  (type
   (->> (nth znf-events 4)
