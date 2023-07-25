@@ -2,7 +2,8 @@
   (:require [clojure.edn :as edn]
             [genegraph.framework.storage.rdf :as rdf]
             [genegraph.framework.event :as event]
-            [genegraph.gene-validity.names])
+            [genegraph.gene-validity.names]
+            [clojure.java.io :as io])
   (:import [java.time Instant]))
 
 (def construct-params
@@ -12,6 +13,8 @@
    :cvbase "https://www.ncbi.nlm.nih.gov/clinvar/variation/"
    :pmbase "https://pubmed.ncbi.nlm.nih.gov/"
    :affbase "http://dataexchange.clinicalgenome.org/agent/"})
+
+(def gdm-sepio-relationships (rdf/read-rdf (str (io/resource "genegraph/gene_validity/sepio_model/gdm_sepio_relationships.ttl")) {:format :turtle}))
 
 (rdf/declare-query construct-proposition
                    construct-evidence-level-assertion
@@ -92,7 +95,6 @@
         (if (seq (is-publish-action-query (:gene-validity/gci-model event)))
           :cg/PublisherRole
           :cg/UnpublisherRole)]
-    (println res)
     res))
 
 (defn params-for-construct [event]
@@ -102,10 +104,11 @@
          :publishRole
          (publish-or-unpublish-role event)
          :publishTime
-         (-> event ::event/timestamp Instant/ofEpochMilli str)))
+         (or (some-> event ::event/timestamp Instant/ofEpochMilli str)
+             "2020-05-01")))
 
 (defn add-model [event]
-  (let [gci-model (:gene-validity/gci-model event)
+  (let [gci-model (rdf/union (:gene-validity/gci-model event) gdm-sepio-relationships)
         params (params-for-construct event)
         unlinked-model (apply
                         rdf/union

@@ -175,12 +175,23 @@
                       (::event/iri %)))
           (into []))))
 
+ (count mras-events)
+
  ((rdf/create-query "select ?x where { ?x <http://dataexchange.clinicalgenome.org/gci/publishClassification> ?o }")
   (-> mras-events first :gene-validity/gci-model))
 
  (rdf/pp-model (-> mras-events first :gene-validity/gci-model))
  (rdf/pp-model (-> mras-events first ::event/model))
 
+ (defn processed-model [event]
+   (::event/model (processor/process-event gv/gene-validity-transform event)))
+
+ (->  (rdf/difference (processed-model (nth mras-events 4))
+                      (processed-model (nth mras-events 3)))
+     rdf/pp-model)
+
+ (rdf/pp-model (processed-model (nth mras-events 3)))
+ 
  (with-open [w (io/writer "/users/tristan/desktop/mras.edn")]
    (pprint (::event/data (first mras-events)) w))
 

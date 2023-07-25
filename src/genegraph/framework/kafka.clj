@@ -7,23 +7,64 @@
            [org.apache.kafka.common KafkaFuture]
            [java.util.concurrent BlockingQueue ArrayBlockingQueue TimeUnit]))
 
-(defn producer-config [topic]
-  (merge (get-in topic [:kafka-cluster :common-config])
-         (get-in topic [:kafka-cluster :producer-config])))
+(defn create-producer [cluster-def opts]
+  (KafkaProducer.
+   (merge (:common-config cluster-def)
+          (:producer-config cluster-def)
+          opts)))
 
-(defrecord KafkaCluster [common-config
-                         consumer-config
-                         producer-config
-                         producer]
-  p/Lifecycle
-  (start [this]
-    (reset! producer (KafkaProducer. (merge producer-config common-config))))
-  (stop [this]
-    (.close @producer)
-    (reset! producer nil)))
+(defn event->producer-record
+  [{topic ::event/kafka-topic
+    k ::event/key
+    v ::event/value}]
+  (if k
+    (ProducerRecord. topic k v)
+    (ProducerRecord. topic v)))
 
-(defmethod p/init :kafka-cluster [def]
-  (map->KafkaCluster (assoc def :producer (atom nil))))
+
+(comment
+  (with-open [p (create-producer
+                 {:name :local
+                  :type :kafka-cluster
+                  :common-config
+                  {"bootstrap.servers" "localhost:9092"}
+                  :producer-config
+                  {"key.serializer"
+                   "org.apache.kafka.common.serialization.StringSerializer",
+                   "value.serializer"
+                   "org.apache.kafka.common.serialization.StringSerializer"}}
+                 {"transactional.id" "testproducer"})]
+
+    (.initTransactions p)
+    (.beginTransaction p)
+    (.send
+     p
+     (event->producer-record
+      {::event/kafka-topic "test"
+       ::event/key "akey"
+       ::event/value "avalue"}))
+    (.commitTransaction p)
+    )
+
+  )
+
+;; (defn producer-config [topic]
+;;   (merge (get-in topic [:kafka-cluster :common-config])
+;;          (get-in topic [:kafka-cluster :producer-config])))
+
+;; (defrecord KafkaCluster [common-config
+;;                          consumer-config
+;;                          producer-config
+;;                          producer]
+;;   p/Lifecycle
+;;   (start [this]
+;;     (reset! producer (KafkaProducer. (merge producer-config common-config))))
+;;   (stop [this]
+;;     (.close @producer)
+;;     (reset! producer nil)))
+
+;; (defmethod p/init :kafka-cluster [def]
+;;   (map->KafkaCluster (assoc def :producer (atom nil))))
 
 (comment
   (def cluster (p/init
@@ -42,66 +83,58 @@
   
   )
 
-(defn event->producer-record
-  [{topic ::event/kafka-topic
-    k ::event/key
-    v ::event/value}]
-  (println topic k v)
-  (if k
-    (ProducerRecord. topic k v)
-    (ProducerRecord. topic v)))
 
-(def topic-defaults
-  {:timeout 1000
-   :buffer-size 100})
+;; (def topic-defaults
+;;   {:timeout 1000
+;;    :buffer-size 100})
 
-(defn publish [producer event]
-  (.send producer (event->producer-record event)))
+;; (defn publish [producer event]
+;;   (.send producer (event->producer-record event)))
 
-(defrecord KafkaConsumerGroupTopic
-    [name
-     buffer-size
-     timeout
-     queue
-     consumer
-     kafka-cluster
-     kafka-topic
-     state
-     kafka-last-offset-at-start
-     kafka-most-recent-offset]
+;; (defrecord KafkaConsumerGroupTopic
+;;     [name
+;;      buffer-size
+;;      timeout
+;;      queue
+;;      consumer
+;;      kafka-cluster
+;;      kafka-topic
+;;      state
+;;      kafka-last-offset-at-start
+;;      kafka-most-recent-offset]
 
-  p/Lifecycle
-  (start [this]
-    )
-  (stop [this]
-    )
+;;   p/Lifecycle
+;;   (start [this]
+;;     )
+;;   (stop [this]
+;;     )
 
-  p/Topic
-  (publish [this event]
-    (.send @(:producer cluster)
-           (event->producer-record
-            (assoc event
-                   ::event/kafka-topic
-                   kafka-topic))))
-  (offset [this] "Local offset for topic")
-   (last-offset [this] "Last available offset for topic")
-  (set-offset! [this offset] "Set local offset for topic")
-  (committed-offset [this] "Committed offset for topic.")
-  (commit-offset! [this offset] "Commit offset to durable storage"))
+;;   p/Topic
+;;   (publish [this event]
+;;     (.send @(:producer cluster)
+;;            (event->producer-record
+;;             (assoc event
+;;                    ::event/kafka-topic
+;;                    kafka-topic))))
+;;   (offset [this] "Local offset for topic")
+;;    (last-offset [this] "Last available offset for topic")
+;;   (set-offset! [this offset] "Set local offset for topic")
+;;   (committed-offset [this] "Committed offset for topic.")
+;;   (commit-offset! [this offset] "Commit offset to durable storage"))
 
-(defmethod p/init :kafka-consumer-group-topic  [topic-definition]
-  (let [topic-def-with-defaults (merge topic-defaults
-                                       topic-definition)]
-    (map->KafkaConsumerGroupTopic
-     (assoc topic-def-with-defaults
-            :queue (ArrayBlockingQueue. (:buffer-size topic-def-with-defaults))
-            :consumer (atom nil)
-            :producer (atom nil)
-            :state (atom :stopped)
-            ;; arbitrarily set > kafka-most-recent so we don't trigger up-to-date?
-            :kafka-last-offset-at-start (atom 1) 
-            :kafka-most-recent-offset (atom 0)
-            :initial-events-complete (atom false)))))
+;; (defmethod p/init :kafka-consumer-group-topic  [topic-definition]
+;;   (let [topic-def-with-defaults (merge topic-defaults
+;;                                        topic-definition)]
+;;     (map->KafkaConsumerGroupTopic
+;;      (assoc topic-def-with-defaults
+;;             :queue (ArrayBlockingQueue. (:buffer-size topic-def-with-defaults))
+;;             :consumer (atom nil)
+;;             :producer (atom nil)
+;;             :state (atom :stopped)
+;;             ;; arbitrarily set > kafka-most-recent so we don't trigger up-to-date?
+;;             :kafka-last-offset-at-start (atom 1) 
+;;             :kafka-most-recent-offset (atom 0)
+;;             :initial-events-complete (atom false)))))
 
 (comment
 

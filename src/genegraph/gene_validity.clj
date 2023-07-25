@@ -74,6 +74,8 @@
                     add-iri]
     ::event/metadata {::event/format :json}}))
 
+;; TODO Links between scores are not obviously being created
+
 (comment
   (def gv-topic {:type :topic
                  :initial-events {:type :file

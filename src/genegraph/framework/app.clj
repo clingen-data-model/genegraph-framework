@@ -14,19 +14,79 @@
 (spec/def ::app
   (spec/keys :req-un [::topics]))
 
-(defrecord App [topics storage processors state]
+(defrecord App [topics storage processors]
 
   p/Lifecycle
   (start [this]
-    (run! p/start (concat (vals @storage)
-                          (vals @topics)
-                          (vals @processors)))
+    (run! p/start
+          (concat (vals storage)
+                  (vals topics)
+                  (vals processors)))
     this)
   (stop [this]
-    (run! p/stop (concat (vals @processors)
-                         (vals @storage)
-                         (vals @topics)))
+    (run! p/stop
+          (concat (vals processors)
+                  (vals storage)
+                  (vals topics)))
     this))
+
+
+
+(defn- init-components [def components]
+  (reduce
+   (fn [a k] (update a k update-vals p/init))
+   def
+   components))
+
+(defn- add-cluster-refs-to-topics [app]
+  (update app
+          :topics
+          (fn [topics]
+            (update-vals
+             topics
+             (fn [topic]
+                 (update
+                  topic
+                  :kafka-cluster
+                  (fn [cluster]
+                    (get-in app [:kafka-clusters cluster]))))))))
+
+(defn- add-kafka-cluster-refs [app component]
+  (update app
+          component
+          (fn [entities]
+            (update-vals
+             entities
+             (fn [e]
+                 (update
+                  e
+                  :kafka-cluster
+                  (fn [cluster]
+                    (get-in app [:kafka-clusters cluster]))))))))
+
+(defn- add-topic-and-storage-refs [app component]
+  (update
+   app
+   component
+   update-vals
+   #(merge % (select-keys app [:topics :storage :kafka-clusters]))))
+
+(defmethod p/init :genegraph-app [app]
+  (-> app
+      (add-kafka-cluster-refs :topics)
+      (add-kafka-cluster-refs :processors)
+      (init-components [:topics :storage])
+      (add-topic-and-storage-refs :processors)
+      (init-components [:processors])
+      map->App))
+
+
+(comment
+  (def a1 (p/init app-def))
+
+  (keys a1)
+  
+  )
 
 (defn- add-type-to-defs [entity-defs type]
   (update-vals entity-defs #(assoc % :type type)))
@@ -42,18 +102,7 @@
              processors
              #(merge % (select-keys app [:storage :topics]))))))
 
-(defn- add-cluster-refs-to-topics [app]
-  (update app
-          :topics
-          (fn [topics]
-            (update-vals
-             topics
-             (fn [topic]
-                 (update
-                  topic
-                  :kafka-cluster
-                  (fn [cluster]
-                    (get-in app [:kafka-clusters cluster]))))))))
+
 
 (defn- add-name-to-entities [app entity-types]
   (reduce (fn [a entity-type]
@@ -81,13 +130,6 @@
       (assoc :state (atom :stopped))
       map->App))
 
-;; (def a (create (select-keys app-def [:kafka-clusters :topics])))
-;; (p/start a)
-;; (-> a :topics deref :test-topic p/poll)
-;; (p/stop a)
-
-
-
 (defn offer-to-test [app]
   (p/offer (get @(:entities app) :test-topic) {:key :k :value :v})
   app)
@@ -96,45 +138,40 @@
   (println "the key be " (::event/key event))
   event)
 
-;; TODO should just write a function to construct
-;; an interceptor with a function reference
-;; mostly want to offer a level of indirection
-;; given a function reference
-
-#_(def test-interceptor
-  {:enter
-   (fn [e]
-     #_(clojure.pprint/pprint e)
-     (clojure.pprint/pprint (s/read (get-in e [::s/storage :test-rocksdb]) :test))
-     e
-     #_(update e :effects conj [:global :test-rocksdb s/write (:key e) (:value e)]))})
-
-(def test-events
-  [{::event/key "e1"
-    ::event/value (pr-str {:test :event})
-    ::event/format :edn}])
-
 (def app-def
-  {:kafka-clusters {:dx-ccloud
-                    { :common {"ssl.endpoint.identification.algorithm" "https"
+  {:type :genegraph-app
+   :kafka-clusters {:dx-ccloud
+                    {:type :kafka-cluster
+                     :common-config {"ssl.endpoint.identification.algorithm" "https"
                               "sasl.mechanism" "PLAIN"
                               "request.timeout.ms" "20000"
                               "bootstrap.servers" "pkc-4yyd6.us-east1.gcp.confluent.cloud:9092"
                               "retry.backoff.ms" "500"
                               "security.protocol" "SASL_SSL"
                               "sasl.jaas.config" (System/getenv "DX_JAAS_CONFIG")}
-                     :consumer {"key.deserializer"
-                                "org.apache.kafka.common.serialization.StringDeserializer"
-                                "value.deserializer"
-                                "org.apache.kafka.common.serialization.StringDeserializer"}
-                     :producer {"key.serializer"
-                                "org.apache.kafka.common.serialization.StringSerializer"
-                                "value.serializer"
-                                "org.apache.kafka.common.serialization.StringSerializer"}}}
+                     :consumer-config {"key.deserializer"
+                                       "org.apache.kafka.common.serialization.StringDeserializer"
+                                       "value.deserializer"
+                                       "org.apache.kafka.common.serialization.StringDeserializer"}
+                     :producer-config {"key.serializer"
+                                       "org.apache.kafka.common.serialization.StringSerializer"
+                                       "value.serializer"
+                                       "org.apache.kafka.common.serialization.StringSerializer"}}
+                    :local
+                    {:common-config {"bootstrap.servers" "localhost:9092"}
+                     :producer-config {"key.serializer"
+                                       "org.apache.kafka.common.serialization.StringSerializer",
+                                       "value.serializer"
+                                       "org.apache.kafka.common.serialization.StringSerializer"}
+                     :consumer-config {"key.deserializer"
+                                       "org.apache.kafka.common.serialization.StringDeserializer"
+                                       "value.deserializer"
+                                     "org.apache.kafka.common.serialization.StringDeserializer"}}}
    :topics {:test-topic
             {:initial-events {:type :gcs
                               :bucket "genegraph-framework-dev"
                               :path "gene_validity_initial_events.edn.gz"}
+             :type :topic
              :kafka-cluster :dx-ccloud
              :kafka-topic "actionability"
              :start-kafka true}}
@@ -143,9 +180,21 @@
               :path "/users/tristan/desktop/test-rocks"}}
    :processors {:test-processor
                 {:subscribe :test-topic
+                 :type :processor
                  :interceptors `[test-interceptor-fn]}}})
 
+
+
+
 (comment
+
+  (def a2 (p/init app-def))
+  (p/start a2)
+  (p/stop a2)
+
+  (p/init app-def)
+  
+  
   {:type :file
    :base "/users/tristan/data/genegraph-neo/"
    :path "gene_validity_initial_events.edn.gz"}

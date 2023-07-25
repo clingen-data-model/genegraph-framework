@@ -3,6 +3,7 @@
   (:require [genegraph.framework.protocol :as p]
             [genegraph.framework.storage :as s]
             [genegraph.framework.event :as event]
+            [genegraph.framework.kafka :as kafka]
             [io.pedestal.interceptor :as interceptor]
             [io.pedestal.interceptor.chain :as interceptor-chain]))
 
@@ -29,7 +30,7 @@
              (if (:storage processor)
                (assoc event
                       ::s/storage
-                      (update-vals @(:storage processor)
+                      (update-vals (:storage processor)
                                    (fn [s] @(:instance s))))
                event))
     :leave (fn [event]
@@ -48,22 +49,43 @@
    {:name ::deserialize-interceptor
     :enter (fn [e] (event/deserialize e))}))
 
+(defn any-kafka-topics?
+  "True if any events are sourced from or destined to
+   topics backed by Kafka."
+  [events topics]
+  (let [kafka-topics (->> topics (filter :kafka-cluster) (map :name) set)]
+    (some kafka-topics (map ::event/topic events))))
+
+(comment
+  (let [t [{:name :is-kafka-topic
+            :kafka-cluster {}}
+           {:name :is-not-kafka-topic}]]
+    [(any-kafka-topics?
+      [{::event/topic :is-kafka-topic}
+       {::event/topic :is-not-kafka-topic}]
+      t)
+     (any-kafka-topics?
+      [{::event/topic :is-not-kafka-topic}]
+      t)])
+  )
+
 (defn publish-interceptor [processor]
   (interceptor/interceptor
    {:name ::publish-interceptor
-    :enter (fn [event]
-             (if (:topics processor)
-               (assoc event
-                      ::event/topics
-                      @(:topics processor))
-               event))
     :leave (fn [event]
-
+             (let [use-transaction (any-kafka-topics? (::event/publish event)
+                                                      (:topics processor))
+                   producer @(:producer processor)]
+               (when use-transaction (.beginTransaction producer))
+               (run! #(p/publish (get (:topics processor) (::event/topic %))
+                                 (assoc % ::kafka/producer producer))
+                     (::event/publish event))
+               (when use-transaction (.commitTransaction producer)))
              event)}))
 
 (defn get-subscribed-topic
   [processor]
-  (get @(:topics processor) (:subscribe processor)))
+  (get (:topics processor) (:subscribe processor)))
 
 (defn ->interceptor 
   "Transform input to Pedestal interceptor. The primary use case for
@@ -107,6 +129,8 @@
                       state
                       interceptors
                       options
+                      producer
+                      producer-cluster
                       init-fn]
 
   p/Lifecycle
@@ -120,15 +144,43 @@
              (when-let [event (p/poll (get-subscribed-topic this))]
                (process-event this event))
              (catch Exception e
-               (clojure.stacktrace/print-stack-trace e))))))))
+               (clojure.stacktrace/print-stack-trace e)))))))
+    (when producer-cluster
+      (reset! producer
+              (kafka/create-producer
+               producer-cluster
+               {"transactional.id" (str name)}))))
   (stop [this]
-    (reset! (:state this) :stopped)))
-
-
+    (reset! (:state this) :stopped)
+    (when-let [p @producer]
+      (.close p)
+      (reset! producer nil))))
 
 (defmethod p/init :processor [processor-def]
   (-> processor-def
       (assoc :state (atom :stopped))
-      #_ (update :interceptors
-              #(mapv ->interceptor %))
+      (assoc :producer (atom nil))
       map->Processor))
+
+
+(comment
+  (def p
+    (p/init
+     {:name :test-processor
+      :type :processor
+      :interceptors `[identity]
+      :producer-cluster {:name :local
+                         :type :kafka-cluster
+                         :common-config
+                         {"bootstrap.servers" "localhost:9092"}
+                         :producer-config
+                         {"key.serializer"
+                          "org.apache.kafka.common.serialization.StringSerializer",
+                          "value.serializer"
+                          "org.apache.kafka.common.serialization.StringSerializer"}}}))
+  
+  (p/start p)
+  (p/stop p)
+
+
+  )
