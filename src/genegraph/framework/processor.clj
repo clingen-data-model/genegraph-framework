@@ -42,45 +42,46 @@
                (catch Exception e (assoc event :error {:fn ::storage-interceptor
                                                        :exception e}))))}))
 
-;; This one doesn't require a reference to the containing processor
-;; so can exist as a simple def
 (def deserialize-interceptor
   (interceptor/interceptor
    {:name ::deserialize-interceptor
     :enter (fn [e] (event/deserialize e))}))
 
-(defn any-kafka-topics?
-  "True if any events are sourced from or destined to
-   topics backed by Kafka."
-  [events topics]
-  (let [kafka-topics (->> topics (filter :kafka-cluster) (map :name) set)]
-    (some kafka-topics (map ::event/topic events))))
+(defn commit-kafka-transaction-interceptor [processor]
+  (interceptor/interceptor
+   {:name ::commit-kafka-transaction
+    :leave (fn [event]
+             (when-let [producer @(:producer processor)]
+               (.commitTransaction producer))
+             event)}))
 
-(comment
-  (let [t [{:name :is-kafka-topic
-            :kafka-cluster {}}
-           {:name :is-not-kafka-topic}]]
-    [(any-kafka-topics?
-      [{::event/topic :is-kafka-topic}
-       {::event/topic :is-not-kafka-topic}]
-      t)
-     (any-kafka-topics?
-      [{::event/topic :is-not-kafka-topic}]
-      t)])
-  )
+(defn commit-kafka-offset-interceptor [processor]
+  (interceptor/interceptor
+   {:name ::commit-kafka-offset
+    :leave (fn [event]
+             (when-let [producer @(:producer processor)]
+               (when (and (::event/consumer-group event)
+                          (::event/offset event)
+                          (::event/kafka-topic event))
+                 (kafka/commit-offset (assoc event ::event/producer producer))))
+             event)}))
+
+(defn open-kafka-transaction-interceptor [processor]
+  (interceptor/interceptor
+   {:name ::open-kafka-transaction
+    :leave (fn [event]
+             (when-let [producer @(:producer processor)]
+               (.beginTransaction producer))
+             event)}))
 
 (defn publish-interceptor [processor]
   (interceptor/interceptor
    {:name ::publish-interceptor
     :leave (fn [event]
-             (let [use-transaction (any-kafka-topics? (::event/publish event)
-                                                      (:topics processor))
-                   producer @(:producer processor)]
-               (when use-transaction (.beginTransaction producer))
+             (let [producer @(:producer processor)]
                (run! #(p/publish (get (:topics processor) (::event/topic %))
                                  (assoc % ::kafka/producer producer))
-                     (::event/publish event))
-               (when use-transaction (.commitTransaction producer)))
+                     (::event/publish event)))
              event)}))
 
 (defn get-subscribed-topic
@@ -98,11 +99,16 @@
     (interceptor/interceptor v)))
 
 (defn add-interceptors [event processor]
+  (println "add-interceptors")
+  (println @(:producer processor))
   (interceptor-chain/enqueue
    event
    (concat
     [(metadata-interceptor processor)
+     (commit-kafka-transaction-interceptor processor)
+     (commit-kafka-offset-interceptor processor)
      (publish-interceptor processor)
+     (open-kafka-transaction-interceptor processor)
      (storage-interceptor processor)
      deserialize-interceptor]
     (mapv ->interceptor (:interceptors processor)))))
@@ -130,12 +136,18 @@
                       interceptors
                       options
                       producer
-                      producer-cluster
+                      kafka-cluster
                       init-fn]
 
   p/Lifecycle
   (start [this]
     (reset! (:state this) :running)
+    ;; start producer first, else race condition
+    (when kafka-cluster
+      (reset! producer
+              (kafka/create-producer
+               kafka-cluster
+               {"transactional.id" (str name)})))
     (when subscribe
       (.start
        (Thread.
@@ -144,12 +156,8 @@
              (when-let [event (p/poll (get-subscribed-topic this))]
                (process-event this event))
              (catch Exception e
-               (clojure.stacktrace/print-stack-trace e)))))))
-    (when producer-cluster
-      (reset! producer
-              (kafka/create-producer
-               producer-cluster
-               {"transactional.id" (str name)}))))
+               (clojure.stacktrace/print-stack-trace e))))))))
+  
   (stop [this]
     (reset! (:state this) :stopped)
     (when-let [p @producer]
@@ -163,24 +171,4 @@
       map->Processor))
 
 
-(comment
-  (def p
-    (p/init
-     {:name :test-processor
-      :type :processor
-      :interceptors `[identity]
-      :producer-cluster {:name :local
-                         :type :kafka-cluster
-                         :common-config
-                         {"bootstrap.servers" "localhost:9092"}
-                         :producer-config
-                         {"key.serializer"
-                          "org.apache.kafka.common.serialization.StringSerializer",
-                          "value.serializer"
-                          "org.apache.kafka.common.serialization.StringSerializer"}}}))
-  
-  (p/start p)
-  (p/stop p)
 
-
-  )

@@ -1,6 +1,6 @@
 (ns genegraph.framework.app
     "Core include refrerencing all necessary dependencies"
-    (:require [genegraph.framework.topic :as topic]
+    (:require #_[genegraph.framework.topic :as topic]
               [genegraph.framework.processor :as processor]
               [genegraph.framework.protocol :as p]
               [genegraph.framework.storage :as s]
@@ -8,6 +8,7 @@
               [genegraph.framework.storage.rocksdb]
               [genegraph.framework.storage.rdf]
               [genegraph.framework.storage.gcs]
+              [genegraph.framework.kafka :as kafka]
               [genegraph.framework.event :as event]
               [clojure.spec.alpha :as spec]))
 
@@ -18,13 +19,13 @@
 
   p/Lifecycle
   (start [this]
-    (run! p/start
+    (run! #(when (satisfies? p/Lifecycle %) (p/start %))
           (concat (vals storage)
                   (vals topics)
                   (vals processors)))
     this)
   (stop [this]
-    (run! p/stop
+    (run! #(when (satisfies? p/Lifecycle %) (p/stop %))
           (concat (vals processors)
                   (vals storage)
                   (vals topics)))
@@ -37,19 +38,6 @@
    (fn [a k] (update a k update-vals p/init))
    def
    components))
-
-(defn- add-cluster-refs-to-topics [app]
-  (update app
-          :topics
-          (fn [topics]
-            (update-vals
-             topics
-             (fn [topic]
-                 (update
-                  topic
-                  :kafka-cluster
-                  (fn [cluster]
-                    (get-in app [:kafka-clusters cluster]))))))))
 
 (defn- add-kafka-cluster-refs [app component]
   (update app
@@ -80,65 +68,16 @@
       (init-components [:processors])
       map->App))
 
+;;;;;
+;; Stuff for testing
+;;;;;
 
-(comment
-  (def a1 (p/init app-def))
-
-  (keys a1)
-  
-  )
-
-(defn- add-type-to-defs [entity-defs type]
-  (update-vals entity-defs #(assoc % :type type)))
-
-(defn- add-initialized-entity-atoms [entity-defs]
-  (atom (update-vals entity-defs p/init)))
-
-(defn- add-topic-and-storage-refs-to-processors [app]
-  (update app
-          :processors
-          (fn [processors]
-            (update-vals
-             processors
-             #(merge % (select-keys app [:storage :topics]))))))
-
-
-
-(defn- add-name-to-entities [app entity-types]
-  (reduce (fn [a entity-type]
-            (update a
-                    entity-type
-                    (fn [entity-map]
-                      (into
-                       {}
-                       (map (fn [[name def]] [name (assoc def :name name)])
-                            entity-map)))))
-          app
-          entity-types))
-
-(defn create
-  [app-def]
-  (-> app-def
-      (add-name-to-entities [:kafka-clusters :topics :storage :processors])
-      add-cluster-refs-to-topics
-      (update :topics add-type-to-defs :topic)
-      (update :topics add-initialized-entity-atoms)
-      (update :storage add-initialized-entity-atoms)
-      (update :processors add-type-to-defs :processor)
-      add-topic-and-storage-refs-to-processors
-      (update :processors add-initialized-entity-atoms)
-      (assoc :state (atom :stopped))
-      map->App))
-
-(defn offer-to-test [app]
-  (p/offer (get @(:entities app) :test-topic) {:key :k :value :v})
-  app)
 
 (defn test-interceptor-fn [event]
   (println "the key be " (::event/key event))
   event)
 
-(def app-def
+(def app-def-1
   {:type :genegraph-app
    :kafka-clusters {:dx-ccloud
                     {:type :kafka-cluster
@@ -183,49 +122,43 @@
                  :type :processor
                  :interceptors `[test-interceptor-fn]}}})
 
-
-
+(def app-def-2
+  {:type :genegraph-app
+   :kafka-clusters {:local
+                    {:common-config {"bootstrap.servers" "localhost:9092"}
+                     :producer-config {"key.serializer"
+                                       "org.apache.kafka.common.serialization.StringSerializer",
+                                       "value.serializer"
+                                       "org.apache.kafka.common.serialization.StringSerializer"}
+                     :consumer-config {"key.deserializer"
+                                       "org.apache.kafka.common.serialization.StringDeserializer"
+                                       "value.deserializer"
+                                     "org.apache.kafka.common.serialization.StringDeserializer"}}}
+   :topics {:test-topic
+            {:name :test-topic
+             :type :kafka-consumer-group-topic
+             :kafka-consumer-group "testcg1"
+             :kafka-cluster :local
+             :kafka-topic "test"}}
+   :storage {:test-rocksdb
+             {:type :rocksdb
+              :name :test-rocksdb
+              :path "/users/tristan/desktop/test-rocks"}}
+   :processors {:test-processor
+                {:subscribe :test-topic
+                 :name :test-processor
+                 :type :processor
+                 :kafka-cluster :local
+                 :interceptors `[test-interceptor-fn]}}})
 
 (comment
 
-  (def a2 (p/init app-def))
+  (def a2 (p/init app-def-2))
   (p/start a2)
+  @(get-in a2 [:topics :test-topic :status])
+  (clojure.stacktrace/print-stack-trace
+   @(get-in a2 [:topics :test-topic :exception]))
+  @(get-in a2 [:processors :test-processor :producer])  
   (p/stop a2)
 
-  (p/init app-def)
-  
-  
-  {:type :file
-   :base "/users/tristan/data/genegraph-neo/"
-   :path "gene_validity_initial_events.edn.gz"}
-  
-  (.exists (s/as-handle {:type :file
-                         :base "/Users/tristan/data/genegraph-neo"
-                         :path "gene_validity_initial_events.edn.gz"}))
-  
-  (def a (create app-def))
-  (p/start a)
-  (p/stop a)
-
-  (first (cons :a [:b :c]))
-  
-  (:topics a)
-  (-> a :topics deref :test-topic )
-  (-> a
-      :processors
-      deref
-      :test-processor
-      (processor/process-event {::event/key :k
-                                ::event/value "{\"object\":\"value\"}"
-                                ::event/metadata {::event/format :json}}))
-  (-> a
-      :processors
-      deref
-      :test-processor
-      (processor/process-event {::event/key :k
-                                ::event/value "{:object \"value\"}"
-                                ::event/metadata {::event/format :edn}}))
-  
-
-  (-> a :topics deref :test-topic (p/offer {:key :test :value "bork"}))
-  @(:topics a))
+)

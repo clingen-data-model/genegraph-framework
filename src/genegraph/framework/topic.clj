@@ -148,20 +148,20 @@
   (stop [this]
     (reset! state :stopped))
 
-  p/Queue
-  (poll [this]
-    (when-let [e (.poll (:queue this)
-                        (:timeout this)
-                        TimeUnit/MILLISECONDS)]
-      (when (= :kafka (::event/source e))
-        (reset! kafka-most-recent-offset (::event/offset e)))
-      e))
+  ;; p/Queue
+  ;; (poll [this]
+  ;;   (when-let [e (.poll (:queue this)
+  ;;                       (:timeout this)
+  ;;                       TimeUnit/MILLISECONDS)]
+  ;;     (when (= :kafka (::event/source e))
+  ;;       (reset! kafka-most-recent-offset (::event/offset e)))
+  ;;     e))
   
-  (offer [this x]
-    (.offer (:queue this)
-            x
-            (:timeout this)
-            TimeUnit/MILLISECONDS)))
+  ;; (offer [this x]
+  ;;   (.offer (:queue this)
+  ;;           x
+  ;;           (:timeout this)
+  ;;           TimeUnit/MILLISECONDS)))
 
 (defmethod p/init :topic  [topic-definition]
   (let [topic-def-with-defaults (merge topic-defaults
