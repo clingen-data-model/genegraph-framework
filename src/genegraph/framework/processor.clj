@@ -34,10 +34,12 @@
                                    (fn [s] @(:instance s))))
                event))
     :leave (fn [event]
+             (println "in storage interceptor " (::event/effects event))
              (try
-               (run! (fn [{:keys [store command args commit-promise]}]
-                       (apply command args))
-                     (:effects event))
+               (when-not (::event/skip-local-effects event)
+                   (run! (fn [{:keys [store command args commit-promise]}]
+                           (apply command args))
+                         (::event/effects event)))
                event
                (catch Exception e (assoc event :error {:fn ::storage-interceptor
                                                        :exception e}))))}))
@@ -51,37 +53,72 @@
   (interceptor/interceptor
    {:name ::commit-kafka-transaction
     :leave (fn [event]
-             (when-let [producer @(:producer processor)]
-               (.commitTransaction producer))
+             (if (:kafka-cluster processor)
+               (.commitTransaction @(:producer processor)))
              event)}))
 
 (defn commit-kafka-offset-interceptor [processor]
   (interceptor/interceptor
    {:name ::commit-kafka-offset
     :leave (fn [event]
-             (when-let [producer @(:producer processor)]
+             (if (:kafka-cluster processor)
                (when (and (::event/consumer-group event)
                           (::event/offset event)
                           (::event/kafka-topic event))
-                 (kafka/commit-offset (assoc event ::event/producer producer))))
+                 (kafka/commit-offset (assoc
+                                       event
+                                       ::event/producer
+                                       @(:producer processor)))))
              event)}))
+
+(defn backing-store-instance
+  "Return instance of backing store for PROCESSOR"
+  [processor]
+  (if-let [backing-store (:backing-store processor)]
+    @(get-in processor [:storage backing-store :instance])))
+
+(defn add-backing-store-interceptor [processor]
+  (interceptor/interceptor
+   {:name ::add-backing-store
+    :enter (fn [event]
+             (if (:backing-store processor)
+               (assoc event
+                      ::event/backing-store
+                      @(get-in processor
+                               [:storage
+                                (:backing-store processor)
+                                :instance]))
+               event))}))
+
+(def commit-local-offset-interceptor
+  (interceptor/interceptor
+   {:name ::commit-local-offset
+    :enter (fn [event]
+             (if (and (::event/backing-store event)
+                      (::event/offset event)
+                      (::event/topic event))
+               (event/record-offset event)
+               event))}))
 
 (defn open-kafka-transaction-interceptor [processor]
   (interceptor/interceptor
    {:name ::open-kafka-transaction
     :leave (fn [event]
-             (when-let [producer @(:producer processor)]
-               (.beginTransaction producer))
+             (if (:kafka-cluster processor)
+               (.beginTransaction @(:producer processor)))
              event)}))
 
+;; TODO, handle error case if topic does not exist
 (defn publish-interceptor [processor]
   (interceptor/interceptor
    {:name ::publish-interceptor
     :leave (fn [event]
-             (let [producer @(:producer processor)]
-               (run! #(p/publish (get (:topics processor) (::event/topic %))
-                                 (assoc % ::kafka/producer producer))
-                     (::event/publish event)))
+             (println "publish-interceptor " (keys event))
+             (when-not (::event/skip-publish-effects event)
+               (let [producer @(:producer processor)]
+                 (run! #(if-let [topic (get (:topics processor) (::event/topic %))]
+                          (p/publish topic (assoc % ::event/producer producer)))
+                       (::event/publish event))))
              event)}))
 
 (defn get-subscribed-topic
@@ -99,17 +136,17 @@
     (interceptor/interceptor v)))
 
 (defn add-interceptors [event processor]
-  (println "add-interceptors")
-  (println @(:producer processor))
   (interceptor-chain/enqueue
    event
    (concat
     [(metadata-interceptor processor)
+     (storage-interceptor processor)
+     (add-backing-store-interceptor processor)
+     commit-local-offset-interceptor
      (commit-kafka-transaction-interceptor processor)
      (commit-kafka-offset-interceptor processor)
      (publish-interceptor processor)
      (open-kafka-transaction-interceptor processor)
-     (storage-interceptor processor)
      deserialize-interceptor]
     (mapv ->interceptor (:interceptors processor)))))
 
@@ -118,6 +155,12 @@
       (add-interceptors processor)
       (interceptor-chain/terminate-when :error)
       interceptor-chain/execute))
+
+(defn starting-offset
+  "Return starting offset for subscribed topic from backing store"
+  [processor]
+  (s/retrieve-offset (backing-store-instance processor)
+                     (:subscribe processor)))
 
 ;; name -- name of processor
 ;; subscribe -- topic to source events from
@@ -137,18 +180,21 @@
                       options
                       producer
                       kafka-cluster
+                      backing-store
                       init-fn]
 
   p/Lifecycle
   (start [this]
     (reset! (:state this) :running)
     ;; start producer first, else race condition
-    (when kafka-cluster
-      (reset! producer
+    (if kafka-cluster
+      (deliver producer
               (kafka/create-producer
                kafka-cluster
-               {"transactional.id" (str name)})))
+               {"transactional.id" (str name)}))
+      (deliver producer nil))
     (when subscribe
+      (println "starting offset " (starting-offset this))
       (.start
        (Thread.
         #(while (= :running @(:state this))
@@ -160,14 +206,13 @@
   
   (stop [this]
     (reset! (:state this) :stopped)
-    (when-let [p @producer]
-      (.close p)
-      (reset! producer nil))))
+    (when kafka-cluster
+      (.close @producer))))
 
 (defmethod p/init :processor [processor-def]
   (-> processor-def
       (assoc :state (atom :stopped))
-      (assoc :producer (atom nil))
+      (assoc :producer (promise))
       map->Processor))
 
 

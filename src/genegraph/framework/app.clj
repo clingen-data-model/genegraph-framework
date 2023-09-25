@@ -9,6 +9,7 @@
               [genegraph.framework.storage.rdf]
               [genegraph.framework.storage.gcs]
               [genegraph.framework.kafka :as kafka]
+              [genegraph.framework.topic :as topic]
               [genegraph.framework.event :as event]
               [clojure.spec.alpha :as spec]))
 
@@ -30,8 +31,6 @@
                   (vals storage)
                   (vals topics)))
     this))
-
-
 
 (defn- init-components [def components]
   (reduce
@@ -71,11 +70,6 @@
 ;;;;;
 ;; Stuff for testing
 ;;;;;
-
-
-(defn test-interceptor-fn [event]
-  (println "the key be " (::event/key event))
-  event)
 
 (def app-def-1
   {:type :genegraph-app
@@ -122,6 +116,19 @@
                  :type :processor
                  :interceptors `[test-interceptor-fn]}}})
 
+(defn test-interceptor-fn [event]
+  (println "the key be " (::event/key event))
+  (-> event
+      (event/publish {::event/key (str "new-" (::event/key event))
+                      ::event/data {:hgvs "NC_00000001:50000A>C"}
+                      ::event/topic :test-endpoint})
+      )
+)
+
+(defn test-publisher-fn [event]
+  (println "publishing ")
+  (event/publish event (:payload event)))
+
 (def app-def-2
   {:type :genegraph-app
    :kafka-clusters {:local
@@ -137,9 +144,24 @@
    :topics {:test-topic
             {:name :test-topic
              :type :kafka-consumer-group-topic
-             :kafka-consumer-group "testcg1"
+             :kafka-consumer-group "testcg8"
              :kafka-cluster :local
-             :kafka-topic "test"}}
+             :kafka-topic "test"}
+            :test-endpoint
+            {:name :test-endpoint
+             :type :kafka-producer-topic
+             :serialization :json
+             :kafka-topic "test-out"
+             :kafka-cluster :local}
+            :test-input
+            {:name :test-input
+             :type :kafka-producer-topic
+             :serialization :json
+             :kafka-topic "test"
+             :kafka-cluster :local}
+            :publish-to-test
+            {:name :publish-to-test
+             :type :simple-queue-topic}}
    :storage {:test-rocksdb
              {:type :rocksdb
               :name :test-rocksdb
@@ -149,16 +171,30 @@
                  :name :test-processor
                  :type :processor
                  :kafka-cluster :local
-                 :interceptors `[test-interceptor-fn]}}})
+                 :backing-store :test-rocksdb
+                 :interceptors `[test-interceptor-fn]}
+                :test-publisher
+                {:name :test-publisher
+                 :subscribe :publish-to-test
+                 :kafka-cluster :local
+                 :type :processor
+                 :interceptors `[test-publisher-fn]}}
+   :api-endpoint {"/" :test-processor
+                  "/graphql" :graphql-processor}})
 
 (comment
 
   (def a2 (p/init app-def-2))
   (p/start a2)
-  @(get-in a2 [:topics :test-topic :status])
-  (clojure.stacktrace/print-stack-trace
-   @(get-in a2 [:topics :test-topic :exception]))
-  @(get-in a2 [:processors :test-processor :producer])  
+  (p/publish (get-in a2 [:topics :publish-to-test])
+             {:payload
+              {::event/key "k4"
+               ::event/value "v8"
+               ::event/topic :test-topic}
+              #_#_#_#_::event/skip-local-effects true
+              ::event/skip-publish-effects true})
+  (s/store-offset @(get-in a2 [:storage :test-rocksdb :instance]) :test-topic 1)
+  (s/retrieve-offset @(get-in a2 [:storage :test-rocksdb :instance]) :test-topic)
+  (get-in a2 [:processors :test-processor :storage :test-rocksdb :instance])
   (p/stop a2)
-
 )

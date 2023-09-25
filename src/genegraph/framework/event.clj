@@ -30,25 +30,36 @@
 (defmethod serialize :edn [event]
   (assoc event ::value (pr-str (::data event))))
 
+(defn record-offset [event]
+;;  (println "event record offset-" event "-" backing-store)
+  (update event
+          ::effects
+          conj
+          {:command storage/store-offset
+           :args [(::backing-store event)
+                  (::topic event)
+                  (::offset event)]}))
+
 (defn store
   "Add deferred write effect to event"
   [event instance k v]
   (let [commit-promise (promise)]
     (update event
-            :effects
+            ::effects
             conj
             {:command storage/write
              :args [(get-in event [::storage/storage instance]) k v commit-promise]
              :commit-promise commit-promise})))
 
 
-(defn publish [event topic publish-event]
+(defn publish
   "add deferred publish effect to event"
+  [event publish-event]
+  (println "adding publish action to event")
   (update event
-          :publish-events
+          ::publish
           conj
-          {:topic topic
-           :event publish-event}))
+          publish-event))
 
 
 

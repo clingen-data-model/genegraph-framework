@@ -1,8 +1,7 @@
 (ns genegraph.framework.kafka
   (:require [genegraph.framework.protocol :as p]
-            [genegraph.framework.event :as event]
-            [genegraph.framework.event.store :as event-store])
-  (:import [org.apache.kafka.clients.admin Admin NewTopic CreateTopicsResult]
+            [genegraph.framework.event :as event])
+  (:import [org.apache.kafka.clients.admin Admin NewTopic CreateTopicsResult OffsetSpec]
            [org.apache.kafka.clients.producer Producer KafkaProducer ProducerRecord]
            [org.apache.kafka.clients.consumer Consumer KafkaConsumer ConsumerGroupMetadata
             OffsetAndMetadata]
@@ -18,7 +17,6 @@
     .initTransactions))
 
 (defn commit-offset [event]
-  (println "commit offset " event)
   (try
     (.sendOffsetsToTransaction
      (::event/producer event)
@@ -47,50 +45,25 @@
    ::event/source :kafka
    ::event/offset (.offset record)})
 
-(def topic-test-app
-  {:type :genegraph-app
-   :kafka-clusters {:local
-                    {:common-config {"bootstrap.servers" "localhost:9092"}
-                     :producer-config {"key.serializer"
-                                       "org.apache.kafka.common.serialization.StringSerializer",
-                                       "value.serializer"
-                                       "org.apache.kafka.common.serialization.StringSerializer"}
-                     :consumer-config {"key.deserializer"
-                                       "org.apache.kafka.common.serialization.StringDeserializer"
-                                       "value.deserializer"
-                                       "org.apache.kafka.common.serialization.StringDeserializer"}}}
-   :topics {:test
-            {:name :test
-             :type :kafka-consumer-group-topic
-             :kafka-cluster :local
-             :kafka-topic "test"
-             :kafka-consumer-group "testcg"}}})
+(defn publish [topic event]
+  (println "publishing " event)
+  (.send
+     (::event/producer event)
+     (event->producer-record
+      (assoc event ::event/kafka-topic (:kafka-topic topic)))))
 
-(comment
-  (with-open [a (create-admin (get-in app-def-2 [:kafka-clusters :local]))]
-    (-> a .listTopics .names .get))
-
-  (with-open [a (create-admin (get-in app-def-2 [:kafka-clusters :local]))]
-    (.deleteTopics a ["test" "gene_validity_raw"]))
-
-  (with-open [a (create-admin (get-in app-def-2 [:kafka-clusters :local]))]
-    (.createTopics a [(NewTopic. "test" 1 (short 1))]))
-
-  (with-open [a (create-admin (get-in topic-test-app [:kafka-clusters :local]))]
-    (.alterConsumerGroupOffsets
-     a
-     "testcg1"
-     {(TopicPartition. "test" 0)
-      (OffsetAndMetadata. 0)}))
-
-)
+(defn poll [topic]
+  (when-let [e (.poll (:queue topic)
+                      (:timeout topic)
+                      TimeUnit/MILLISECONDS)]
+    (reset! (:kafka-most-recent-offset topic) (::event/offset e))
+    e))
 
 (def topic-defaults
   {:timeout 1000
    :buffer-size 100
    :kafka-options {"enable.auto.commit" false
                    "auto.offset.reset" "earliest"}})
-
 
 (defrecord KafkaConsumerGroupTopic
     [name
@@ -131,7 +104,7 @@
                    iterator-seq
                    (map consumer-record->event)
                    (map #(assoc %
-                                ::event/topic-name name
+                                ::event/topic name
                                 ::event/consumer-group kafka-consumer-group))
                    ;; TODO implement circuit breaker;
                    ;; this is going to drop messages if the queue fills
@@ -151,18 +124,13 @@
 
   p/Consumer
   (poll [this]
-    (when-let [e (.poll (:queue this)
-                        (:timeout this)
-                        TimeUnit/MILLISECONDS)]
-      (when (= :kafka (::event/source e))
-        (reset! kafka-most-recent-offset (::event/offset e)))
+    (when-let [e (.poll queue timeout TimeUnit/MILLISECONDS)]
+      (reset! kafka-most-recent-offset (::event/offset e))
       e))
 
   p/Publisher
   (publish [this event]
-    (.send
-     (::event/producer event)
-     (event->producer-record (assoc event ::event/kafka-topic kafka-topic))))
+    (publish this event))
   
   p/Offsets
   (offset [this] "Local offset for topic")
@@ -185,38 +153,110 @@
             :initial-events-complete (atom false)
             :exception (atom nil)))))
 
-(comment
-  (def t2 (p/init topic-test-app))
-  (p/start t2)
-  @(get-in t2 [:topics :test :status])
-  (clojure.stacktrace/print-stack-trace @(get-in t2 [:topics :test :exception]))
-  (p/stop t2)
-  (with-open [p (create-producer (get-in t2 [:kafka-clusters :local])
-                                 {"transactional.id" "test-producer"})]
-    (.initTransactions p)
-    (.beginTransaction p)
-    (p/publish (get-in t2 [:topics :test])
-               {::event/key "k2"
-                ::event/value "v2"
-                ::event/producer p})
-    (.commitTransaction p))
+(defrecord KafkaProducerTopic
+    [name
+     kafka-cluster
+     kafka-topic]
+
+  p/Publisher
+  (publish [this event]
+    (publish this event)))
+
+(defmethod p/init :kafka-producer-topic [topic-definition]
+  (map->KafkaProducerTopic topic-definition))
+
+(defrecord KafkaReaderTopic
+    [name
+     buffer-size
+     timeout
+     ^BlockingQueue queue
+     consumer
+     consumer-thread
+     kafka-cluster
+     kafka-topic
+     kafka-options
+     status
+     kafka-last-offset-at-start
+     kafka-most-recent-offset
+     kafka-start-offset
+     exception]
+
+  p/Lifecycle
+  (start [this]
+    (reset! status :running)
+    (reset!
+     consumer-thread
+     (Thread.
+      (fn []
+        (let [offset @kafka-start-offset
+              topic-partition [(TopicPartition. kafka-topic 0)]
+              ^KafkaConsumer new-consumer (KafkaConsumer.
+                                           (apply
+                                            merge
+                                            (:common-config kafka-cluster)
+                                            (:consumer-config kafka-cluster)
+                                            kafka-options))]
+          (reset! consumer new-consumer)
+          (try
+            (.assign new-consumer [topic-partition])
+            (.seek new-consumer topic-partition offset)
+            (while (= :running @status)
+              (->> (.poll new-consumer (Duration/ofMillis 100))
+                   .iterator
+                   iterator-seq
+                   (map consumer-record->event)
+                   (map #(assoc % ::event/topic name))
+                   ;; TODO implement circuit breaker;
+                   ;; this is going to drop messages if the queue fills
+                   ;; and does not empty quickly enough
+                   (run! #(.offer queue % timeout TimeUnit/MILLISECONDS))))
+            (reset! status :stopped)
+            (catch Exception e
+              (do (reset! status :exception)
+                  (reset! exception e))))
+          (try 
+            (.unsubscribe new-consumer)
+            (catch Exception e (reset! status :exception)))))))
+    (.start @consumer-thread))
   
-  )
+  (stop [this]
+    (reset! status :stopping))
 
-(comment
+  p/Consumer
+  (poll [this]
+    (when-let [e (.poll queue timeout TimeUnit/MILLISECONDS)]
+      (reset! kafka-most-recent-offset (::event/offset e))
+      e))
 
-  (def gv-events
-    (event-store/with-event-reader [r "/users/tristan/data/genegraph-neo/gv_events.edn.gz"]
-      (into [] (event-store/event-seq r))))
-
-  (count gv-events)
-
-  (def producer-config
-    {"bootstrap.servers" "localhost:9092"
-     "key.serializer" "org.apache.kafka.common.serialization.StringSerializer"                        "value.serializer"                "org.apache.kafka.common.serialization.StringSerializer"})
+  p/Publisher
+  (publish [this event]
+    (publish this event))
   
-  (time
-   (with-open [p (KafkaProducer. producer-config)]
-     (run! #(publish p %)
-           (map #(assoc % ::event/kafka-topic "test") gv-events))))
-  )
+  p/Offsets
+  (offset [this] @kafka-most-recent-offset)
+  (last-offset [this] @kafka-most-recent-offset)
+  (set-offset! [this offset] (deliver kafka-start-offset offset))
+  (committed-offset [this] "Committed offset for topic."))
+
+(defmethod p/init :kafka-reader-topic  [topic-definition]
+  (let [topic-def-with-defaults (merge topic-defaults
+                                       topic-definition)]
+    (map->KafkaConsumerGroupTopic
+     (assoc topic-def-with-defaults
+            :queue (ArrayBlockingQueue. (:buffer-size topic-def-with-defaults))
+            :consumer (atom nil)
+            :consumer-thread (atom nil)
+            :status (atom :stopped)
+            ;; arbitrarily set > kafka-most-recent so we don't trigger up-to-date?
+            :kafka-last-offset-at-start (atom 0) 
+            :kafka-most-recent-offset (atom -1)
+            :initial-events-complete (atom false)
+            :exception (atom nil)))))
+
+
+
+
+
+
+
+

@@ -1,5 +1,5 @@
 (ns genegraph.framework.event.store
-  "Function for handling a store of events. Offers "
+  "Function for handling a store of events."
   (:require [clojure.edn :as edn]
             [clojure.pprint :refer [pprint]]
             [clojure.java.io :as io])
@@ -11,7 +11,6 @@
   (try
     (edn/read pbr)
     (catch Exception e
-      #_(println e)
       :EOF)))
 
 (defn event-seq [pbr]

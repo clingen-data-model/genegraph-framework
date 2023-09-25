@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [clojure.set :as s]
             [clojure.data.json :as json]
+            [genegraph.framework.protocol :as p]
             [genegraph.framework.event :as event]
             [genegraph.framework.event.store :as event-store]
             [genegraph.framework.storage.rdf :as rdf]
@@ -175,6 +176,47 @@
                       (::event/iri %)))
           (into []))))
 
+ (def pex19-events
+   (event-store/with-event-reader [r "/Users/tristan/data/genegraph-neo/gv_events.edn.gz"]
+     (->> (event-store/event-seq r)
+          (filter #(re-find #"fa073c77" (::event/value %)))
+          #_(map #(processor/process-event gv/gene-validity-transform %))
+          #_(filter #(= :publish (::event/action %)))
+          #_(filter #(= "http://dataexchange.clinicalgenome.org/gci/e4ea022c-a24e-42dd-b7e6-62eccb391a4f"
+                      (::event/iri %)))
+          (into []))))
+
+ (count pex19-events)
+
+ (def pex19-curation
+   (::event/model (processor/process-event gv/gene-validity-transform (last pex19-events))))
+
+ ((rdf/create-query "select ?x where { ?x a :dc/BibliographicResource }") pex19-curation)
+
+ (rdf/pp-model
+  ((rdf/create-query "construct { ?s ?p ?o } where { ?s a :dc/BibliographicResource . ?s ?p ?o }") pex19-curation))
+
+ (rdf/pp-model
+  ((rdf/create-query "construct { ?s ?p ?o } where { ?s a :dc/BibliographicResource . ?s ?p ?o }") pex19-curation))
+
+ (rdf/pp-model
+  ((rdf/create-query "construct { ?s ?p ?o ; :dc/source ?source . } where { ?s :dc/source ?source . ?s ?p ?o . ?source a :dc/BibliographicResource .}")
+   pex19-curation))
+
+ ;;allele
+ (rdf/pp-model
+  ((rdf/create-query "construct { ?s ?p ?o } where { ?s ?p ?o .}")
+   pex19-curation
+   {:s (rdf/resource "http://dataexchange.clinicalgenome.org/gci/d664b4b5-4e2b-4d91-893c-4bcdeb804da4")}))
+
+
+ (spit "/users/tristan/desktop/pex19.txt"
+       (with-out-str (-> (processor/process-event gv/gene-validity-transform (last pex19-events))
+                         ::event/model
+                         rdf/pp-model)))
+
+ (println "o")
+
  (count mras-events)
 
  ((rdf/create-query "select ?x where { ?x <http://dataexchange.clinicalgenome.org/gci/publishClassification> ?o }")
@@ -225,3 +267,10 @@
       (map ::event/iri)
       frequencies)
  )
+
+(comment
+  (p/start gv/gene-validity-transform)
+  (keys gv/gene-validity-transform)
+  (:state gv/gene-validity-transform)
+  (p/stop gv/gene-validity-transform)
+  )

@@ -140,16 +140,14 @@
                     (key-to-byte-array start)
                     (key-to-byte-array end))))}
 
-  ;; Consider sing other keys, or multipart keys if other storage facts
-  ;; needed. Also may need 
-  #_#_p/TopicBackingStore
+  storage/TopicBackingStore
   {:store-offset
    (fn [this topic offset]
+     (println "rocks storing offset " topic "-" offset)
      (rocks-write! this topic offset))
    :retrieve-offset
    (fn [this topic]
-     (rocks-get this topic))}
-  )
+     (rocks-get this topic))})
 
 (comment 
 

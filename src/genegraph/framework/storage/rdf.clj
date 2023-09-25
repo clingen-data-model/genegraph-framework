@@ -58,6 +58,9 @@
   ([src opts] (-> (ModelFactory/createDefaultModel)
                   (.read src nil (jena-rdf-format (:format opts :rdf-xml))))))
 
+(defn resource [x]
+  (types/resource x))
+
 (defn create-query
   ([query-source] (create-query query-source {}))
   ([query-source params] (query/create-query query-source params)))
