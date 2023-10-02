@@ -117,7 +117,6 @@
                  :interceptors `[test-interceptor-fn]}}})
 
 (defn test-interceptor-fn [event]
-  (println "the key be " (::event/key event))
   (-> event
       (event/publish {::event/key (str "new-" (::event/key event))
                       ::event/data {:hgvs "NC_00000001:50000A>C"}
@@ -126,7 +125,6 @@
 )
 
 (defn test-publisher-fn [event]
-  (println "publishing ")
   (event/publish event (:payload event)))
 
 (def app-def-2
@@ -188,13 +186,14 @@
   (p/start a2)
   (p/publish (get-in a2 [:topics :publish-to-test])
              {:payload
-              {::event/key "k4"
-               ::event/value "v8"
+              {::event/key "k6"
+               ::event/value "v10"
                ::event/topic :test-topic}
               #_#_#_#_::event/skip-local-effects true
               ::event/skip-publish-effects true})
   (s/store-offset @(get-in a2 [:storage :test-rocksdb :instance]) :test-topic 1)
   (s/retrieve-offset @(get-in a2 [:storage :test-rocksdb :instance]) :test-topic)
+  (processor/starting-offset (get-in a2 [:processors :test-processor]))
   (get-in a2 [:processors :test-processor :storage :test-rocksdb :instance])
   (p/stop a2)
 )

@@ -34,7 +34,6 @@
                                    (fn [s] @(:instance s))))
                event))
     :leave (fn [event]
-             (println "in storage interceptor " (::event/effects event))
              (try
                (when-not (::event/skip-local-effects event)
                    (run! (fn [{:keys [store command args commit-promise]}]
@@ -113,7 +112,6 @@
   (interceptor/interceptor
    {:name ::publish-interceptor
     :leave (fn [event]
-             (println "publish-interceptor " (keys event))
              (when-not (::event/skip-publish-effects event)
                (let [producer @(:producer processor)]
                  (run! #(if-let [topic (get (:topics processor) (::event/topic %))]
@@ -159,8 +157,9 @@
 (defn starting-offset
   "Return starting offset for subscribed topic from backing store"
   [processor]
-  (s/retrieve-offset (backing-store-instance processor)
-                     (:subscribe processor)))
+  (if-let [backing-store (backing-store-instance processor)]
+    (s/retrieve-offset backing-store (:subscribe processor))
+    nil))
 
 ;; name -- name of processor
 ;; subscribe -- topic to source events from
@@ -194,7 +193,6 @@
                {"transactional.id" (str name)}))
       (deliver producer nil))
     (when subscribe
-      (println "starting offset " (starting-offset this))
       (.start
        (Thread.
         #(while (= :running @(:state this))

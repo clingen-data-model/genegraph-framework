@@ -31,7 +31,6 @@
   (assoc event ::value (pr-str (::data event))))
 
 (defn record-offset [event]
-;;  (println "event record offset-" event "-" backing-store)
   (update event
           ::effects
           conj
@@ -55,7 +54,6 @@
 (defn publish
   "add deferred publish effect to event"
   [event publish-event]
-  (println "adding publish action to event")
   (update event
           ::publish
           conj

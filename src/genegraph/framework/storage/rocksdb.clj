@@ -143,7 +143,6 @@
   storage/TopicBackingStore
   {:store-offset
    (fn [this topic offset]
-     (println "rocks storing offset " topic "-" offset)
      (rocks-write! this topic offset))
    :retrieve-offset
    (fn [this topic]

@@ -46,7 +46,6 @@
    ::event/offset (.offset record)})
 
 (defn publish [topic event]
-  (println "publishing " event)
   (.send
      (::event/producer event)
      (event->producer-record
