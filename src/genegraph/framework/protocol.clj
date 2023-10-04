@@ -18,6 +18,9 @@
 (defprotocol Offsets
   "For topics supporting offsets"
   (offset [this] "Local offset for topic")
-  (last-offset [this] "Last available offset for topic")
+  (last-available-offset [this] "Last available offset for topic")
+  (last-committed-offset [this]
+    "Last offset committed for this topic, e.g. the current
+consumer group offset.")
   (set-offset! [this offset] "Set local offset for topic")
   (committed-offset [this] "Committed offset for topic."))

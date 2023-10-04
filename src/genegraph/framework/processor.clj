@@ -154,7 +154,7 @@
       (interceptor-chain/terminate-when :error)
       interceptor-chain/execute))
 
-(defn starting-offset
+(defn initial-offset
   "Return starting offset for subscribed topic from backing store"
   [processor]
   (if-let [backing-store (backing-store-instance processor)]
@@ -192,12 +192,14 @@
                kafka-cluster
                {"transactional.id" (str name)}))
       (deliver producer nil))
-    (when subscribe
+    (when-let [subscribed-topic (get-subscribed-topic this)]
+      (when (satisfies? p/Offsets subscribed-topic)
+        (p/set-offset! subscribed-topic (initial-offset this)))
       (.start
        (Thread.
         #(while (= :running @(:state this))
            (try 
-             (when-let [event (p/poll (get-subscribed-topic this))]
+             (when-let [event (p/poll subscribed-topic)]
                (process-event this event))
              (catch Exception e
                (clojure.stacktrace/print-stack-trace e))))))))

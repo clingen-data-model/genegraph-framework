@@ -117,12 +117,11 @@
                  :interceptors `[test-interceptor-fn]}}})
 
 (defn test-interceptor-fn [event]
+  (println "test-interceptor-fn " (::event/key event))
   (-> event
       (event/publish {::event/key (str "new-" (::event/key event))
                       ::event/data {:hgvs "NC_00000001:50000A>C"}
-                      ::event/topic :test-endpoint})
-      )
-)
+                      ::event/topic :test-endpoint})))
 
 (defn test-publisher-fn [event]
   (event/publish event (:payload event)))
@@ -142,7 +141,7 @@
    :topics {:test-topic
             {:name :test-topic
              :type :kafka-consumer-group-topic
-             :kafka-consumer-group "testcg8"
+             :kafka-consumer-group "testcg9"
              :kafka-cluster :local
              :kafka-topic "test"}
             :test-endpoint
@@ -184,10 +183,17 @@
 
   (def a2 (p/init app-def-2))
   (p/start a2)
+  (-> a2
+      :topics
+      :test-topic
+      :state
+      deref
+      :kafka-consumer
+      .assignment)
   (p/publish (get-in a2 [:topics :publish-to-test])
              {:payload
-              {::event/key "k6"
-               ::event/value "v10"
+              {::event/key "k13"
+               ::event/value "v18"
                ::event/topic :test-topic}
               #_#_#_#_::event/skip-local-effects true
               ::event/skip-publish-effects true})
