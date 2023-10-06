@@ -63,6 +63,14 @@
          (:timeout topic)
          TimeUnit/MILLISECONDS))
 
+(defn deliver-event
+  "Offer event to local queue"
+  [topic event]
+  (.offer (:queue topic)
+          event
+          (:timeout topic)
+          TimeUnit/MILLISECONDS))
+
 (defn poll-kafka-consumer
   "default method to poll a Kafka consumer for new records.
   returns vector of events converted to Clojure data"
@@ -89,9 +97,13 @@
       (KafkaConsumer. config))))
 
 (defn backing-store-lags-consumer-group? [topic]
-  (let [state @(:state topic)]
-    (<  @(:initial-local-offset state)
-        @(:initial-consumer-group-offset state))))
+  (let [state @(:state topic)
+        local-offset (deref (:initial-local-offset state) 100 :timeout)
+        cg-offset (deref (:initial-consumer-group-offset state) 100 :timeout)]
+    (if (or (= :timeout local-offset) (= :timeout cg-offset))
+      :timeout
+      (< local-offset cg-offset))))
+
 
 (defn produce-local-events
   "Provide events based on offset provided by local storage.
@@ -99,36 +111,36 @@
    If the maximum available offset is nil, or not provided."
   ([topic] (produce-local-events topic Long/MAX_VALUE))
   ([topic last-offset]
-   (when-let [offset @(:initial-local-offset @(:state topic))]
-     (let [topic-partition (TopicPartition. (:kafka-topic topic) 0)
-           ^KafkaConsumer consumer (create-kafka-consumer topic)]
-       (try
+   (try 
+     (when-let [offset @(:initial-local-offset @(:state topic))]
+       (let [topic-partition (TopicPartition. (:kafka-topic topic) 0)
+             ^KafkaConsumer consumer (create-kafka-consumer topic)]
          (.assign consumer [topic-partition])
          (.seek consumer topic-partition offset)
          (while (and (= :running (:status @(:state topic))))
-           (->> (.poll consumer (Duration/ofMillis 100))
-                .iterator
-                iterator-seq
-                (map consumer-record->event)
+           (->> (poll-kafka-consumer consumer)
                 (map #(assoc %
                              ::event/topic (:name topic)
                              ::event/skip-publish-effects true))
-                (run! #(.offer (:queue topic)
-                               %
-                               (:timeout topic)
-                               TimeUnit/MILLISECONDS))))
-         (catch Exception e
-           (swap! (:state topic)
-                  assoc
-                  :status :exception
-                  :exception e)))
-       (try 
-         (.unsubscribe consumer)
-         (catch Exception e
-           (swap! (:state topic)
-                  assoc
-                  :status :exception
-                  :exception e)))))))
+                (run! #(deliver-event topic %))))
+         (.unsubscribe consumer)))
+     (catch Exception e (p/exception topic e)))))
+
+(defn update-local-storage!
+  "Check to see if the most recently stored events in local storage are
+  up to date. If not, push them onto the queue, avoiding publish effects.
+
+  Return the first set of events pulled from the consumer-group backed
+  consumer, since it's necessary to poll (possibly multiple times) for
+  the subscription to register on the server and for the consumer offsets
+  to be readable."
+  [topic]
+  (let [consumer (:kafka-consumer @(:state topic))]
+    (loop [events (poll-kafka-consumer consumer)]
+      (case (backing-store-lags-consumer-group? topic)
+        true (do (produce-local-events topic) events)
+        false events
+        :timeout (recur (poll-kafka-consumer consumer))))))
 
 (defn last-committed-offset [topic]
   (let [consumer (:kafka-consumer @(:state topic))]
@@ -167,40 +179,22 @@
         (fn []
           (let [^KafkaConsumer new-consumer (create-kafka-consumer this)]
             (try
-              (println "starting topic " name)
               (swap! state assoc :kafka-consumer new-consumer)
               (.subscribe new-consumer
                           [kafka-topic]
                           (consumer-rebalance-listener this))
-              (poll-kafka-consumer new-consumer)
-              (when (backing-store-lags-consumer-group? this)
-                (println "backing store lags consumer group " name)
-                (produce-local-events this))
-              (println "local events up to date " name)
-              (while (= :running (:status @state))
-                (->> (.poll new-consumer (Duration/ofMillis 100))
-                     .iterator
-                     iterator-seq
-                     (map consumer-record->event)
-                     (map #(assoc %
-                                  ::event/topic name
-                                  ::event/consumer-group kafka-consumer-group))
-                     ;; TODO implement circuit breaker;
-                     ;; this is going to drop messages if the queue fills
-                     ;; and does not empty quickly enough
-                     (run! #(.offer queue % timeout TimeUnit/MILLISECONDS))))
+              (loop [events (update-local-storage! this)]
+                (run! #(deliver-event
+                        this
+                        (assoc %
+                               ::event/topic name
+                               ::event/consumer-group kafka-consumer-group) )
+                      events)
+                (when (= :running (:status @state))
+                  (recur (poll-kafka-consumer new-consumer))))
               (swap! state assoc :status :stopped)
-              (catch Exception e
-                (swap! state
-                       assoc
-                       :status :exception
-                       :exception e)))
-            (try 
               (.unsubscribe new-consumer)
-              (catch Exception e (swap! state
-                                        assoc
-                                        :status :exception
-                                        :exception e))))))))
+              (catch Exception e (p/exception this e))))))))
   
     (stop [this]
       (swap! state assoc :status :stopping))

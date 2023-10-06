@@ -187,12 +187,10 @@
       :topics
       :test-topic
       :state
-      deref
-      :kafka-consumer
-      .assignment)
+      deref)
   (p/publish (get-in a2 [:topics :publish-to-test])
              {:payload
-              {::event/key "k13"
+              {::event/key "k15"
                ::event/value "v18"
                ::event/topic :test-topic}
               #_#_#_#_::event/skip-local-effects true

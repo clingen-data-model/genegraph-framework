@@ -1,5 +1,6 @@
 (ns genegraph.framework.protocol
-  "Defines protocols and multimethods for entities in Genegraph")
+  "Defines protocols, multimethods, and commonly used functions
+  for entities in Genegraph.")
 
 (defmulti init :type)
 
@@ -24,3 +25,11 @@
 consumer group offset.")
   (set-offset! [this offset] "Set local offset for topic")
   (committed-offset [this] "Committed offset for topic."))
+
+(defn exception
+  "Registers exception e occurred in entity this"
+  [this e]
+  (swap! (:state this)
+         assoc
+         :status :exception
+         :exception e))
