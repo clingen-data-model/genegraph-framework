@@ -10,7 +10,7 @@
            [java.util.concurrent BlockingQueue ArrayBlockingQueue TimeUnit]))
 
 ;; TODO Start here
-;; Cleanup code, there's a fair amount of duplicated code
+;; Cleanup and test KafkaReaderTopic
 ;; 
 
 (defn create-producer [cluster-def opts]
@@ -105,26 +105,47 @@
       (< local-offset cg-offset))))
 
 
+(defn kafka-position
+  "Retrieve the position of the next record to be consumed from the
+  Kafka consumer. Uses the active consumer for the topic if not otherwise
+  provided. Throws exception if position cannot be read before topic
+  timeout."
+  ([topic]
+   (kafka-position topic (:kafka-consumer @(:state topic))))
+  ([topic consumer]
+   (.position consumer
+              (TopicPartition. (:kafka-topic topic) 0)
+              (Duration/ofMillis (:timeout topic)))))
+
+(defn create-local-kafka-consumer
+  "Create a local Kafka consumer, initialzed to initial-offset"
+  ([topic]
+   (create-local-kafka-consumer topic @(:initial-local-offset @(:state topic))))
+  ([topic initial-offset]
+   (let [topic-partition (TopicPartition. (:kafka-topic topic) 0)]
+     (doto (create-kafka-consumer topic)
+       (.assign [topic-partition])
+       (.seek topic-partition initial-offset)))))
+
 (defn produce-local-events
   "Provide events based on offset provided by local storage.
    If nil is provided for initial offset, return immediately.
    If the maximum available offset is nil, or not provided."
-  ([topic] (produce-local-events topic Long/MAX_VALUE))
-  ([topic last-offset]
-   (try 
-     (when-let [offset @(:initial-local-offset @(:state topic))]
-       (let [topic-partition (TopicPartition. (:kafka-topic topic) 0)
-             ^KafkaConsumer consumer (create-kafka-consumer topic)]
-         (.assign consumer [topic-partition])
-         (.seek consumer topic-partition offset)
-         (while (and (= :running (:status @(:state topic))))
-           (->> (poll-kafka-consumer consumer)
-                (map #(assoc %
-                             ::event/topic (:name topic)
-                             ::event/skip-publish-effects true))
-                (run! #(deliver-event topic %))))
-         (.unsubscribe consumer)))
-     (catch Exception e (p/exception topic e)))))
+  [topic]
+  (let [last-offset @(:initial-consumer-group-offset @(:state topic))]
+    (try 
+      (when-let [offset @(:initial-local-offset @(:state topic))]
+        (let [^KafkaConsumer consumer (create-local-kafka-consumer topic offset)]
+          (while (and (= :running (:status @(:state topic)))
+                      (< (kafka-position topic consumer) last-offset))
+            (->> (poll-kafka-consumer consumer)
+                 (filter #(< (::event/offset %) last-offset))
+                 (map #(assoc %
+                              ::event/topic (:name topic)
+                              ::event/skip-publish-effects true))
+                 (run! #(deliver-event topic %))))
+          (.unsubscribe consumer)))
+      (catch Exception e (p/exception topic e)))))
 
 (defn update-local-storage!
   "Check to see if the most recently stored events in local storage are
@@ -151,14 +172,15 @@
             first
             .offset)))
 
+;; TODO clean shutdown of Kafka
 (defn consumer-rebalance-listener [topic]
   (reify ConsumerRebalanceListener
     (onPartitionsAssigned [_ partitions]
-      (println "partitions assigned")
       (deliver (:initial-consumer-group-offset @(:state topic))
                (last-committed-offset topic)))
-    (onPartitionsLost [_ partitions] (println "partitons lost"))
-    (onPartitionsRevoked [_ partitions] (println "partitions revoked"))))
+    #_(onPartitionsLost [_ partitions] [])
+    #_(onPartitionsRevoked [_ partitions] [])))
+
 
 (defrecord KafkaConsumerGroupTopic
     [name
@@ -210,11 +232,7 @@
       (publish this event))
   
     p/Offsets
-    (offset [this] "Local offset for topic")
-    (last-available-offset [this] "Last available offset for topic")
-    (last-committed-offset [this] nil)
-    (set-offset! [this offset] (deliver (:initial-local-offset @state) offset))
-    (committed-offset [this] "Committed offset for topic."))
+    (set-offset! [this offset] (deliver (:initial-local-offset @state) offset)))
 
 (defmethod p/init :kafka-consumer-group-topic  [topic-definition]
   (let [topic-def-with-defaults (merge topic-defaults
@@ -243,94 +261,75 @@
      buffer-size
      timeout
      ^BlockingQueue queue
-     consumer
-     consumer-thread
      kafka-cluster
      kafka-topic
      kafka-options
-     status
-     kafka-last-offset-at-start
-     kafka-most-recent-offset
-     kafka-start-offset
-     exception]
+     state]
 
   p/Lifecycle
   (start [this]
-    (reset! status :running)
-    (reset!
-     consumer-thread
+    (swap! state assoc :status :running)
+    (.start
      (Thread.
       (fn []
-        (let [offset @kafka-start-offset
-              topic-partition [(TopicPartition. kafka-topic 0)]
-              ^KafkaConsumer new-consumer (KafkaConsumer.
-                                           (apply
-                                            merge
-                                            (:common-config kafka-cluster)
-                                            (:consumer-config kafka-cluster)
-                                            kafka-options))]
-          (reset! consumer new-consumer)
-          (try
-            (.assign new-consumer [topic-partition])
-            (.seek new-consumer topic-partition offset)
-            (while (= :running @status)
-              (->> (.poll new-consumer (Duration/ofMillis 100))
-                   .iterator
-                   iterator-seq
-                   (map consumer-record->event)
-                   (map #(assoc % ::event/topic name))
-                   ;; TODO implement circuit breaker;
-                   ;; this is going to drop messages if the queue fills
-                   ;; and does not empty quickly enough
-                   (run! #(.offer queue % timeout TimeUnit/MILLISECONDS))))
-            (reset! status :stopped)
-            (catch Exception e
-              (do (reset! status :exception)
-                  (reset! exception e))))
-          (try 
-            (.unsubscribe new-consumer)
-            (catch Exception e (reset! status :exception)))))))
-    (.start @consumer-thread))
+        (try
+          (let [^KafkaConsumer consumer (create-local-kafka-consumer this)]
+            (swap! state assoc :kafka-consumer consumer)
+            (while (= :running (:status @state))
+              (->> (poll-kafka-consumer consumer)
+                   (map #(assoc %
+                                ::event/topic name
+                                ::event/skip-publish-effects true))
+                   (run! #(.offer queue % timeout TimeUnit/MILLISECONDS)))
+              (Thread/sleep 100))
+            (.unsubscribe consumer)
+            (swap! state assoc :status :stopped))
+          (catch Exception e (p/exception this e)))))))
   
   (stop [this]
-    (reset! status :stopping))
+    (swap! state assoc :status :stopping))
 
   p/Consumer
-  (poll [this]
-    (when-let [e (.poll queue timeout TimeUnit/MILLISECONDS)]
-      (reset! kafka-most-recent-offset (::event/offset e))
-      e))
+  (poll [this] (poll this))
 
   p/Publisher
-  (publish [this event]
-    (publish this event))
+  (publish [this event] (publish this event))
   
   p/Offsets
-  (offset [this] @kafka-most-recent-offset)
-  (last-available-offset [this] @kafka-most-recent-offset)
-  (last-committed-offset [this] nil)
-  (set-offset! [this offset] (deliver kafka-start-offset offset))
-  (committed-offset [this] "Committed offset for topic."))
+  (set-offset! [this offset] (deliver (:initial-local-offset @state) offset)))
 
 (defmethod p/init :kafka-reader-topic  [topic-definition]
   (let [topic-def-with-defaults (merge topic-defaults
                                        topic-definition)]
-    (map->KafkaConsumerGroupTopic
+    (map->KafkaReaderTopic
      (assoc topic-def-with-defaults
             :queue (ArrayBlockingQueue. (:buffer-size topic-def-with-defaults))
-            :consumer (atom nil)
-            :consumer-thread (atom nil)
-            :status (atom :stopped)
-            ;; arbitrarily set > kafka-most-recent so we don't trigger up-to-date?
-            :kafka-last-offset-at-start (atom 0) 
-            :kafka-most-recent-offset (atom -1)
-            :initial-events-complete (atom false)
-            :exception (atom nil)))))
+            :state (atom {:initial-local-offset (promise)
+                          :status :stopped})))))
 
 
-
-
-
+(comment
+  (def t
+    (p/init
+     {:name :test-reader
+      :type :kafka-reader-topic
+      :kafka-cluster
+      {:common-config {"bootstrap.servers" "localhost:9092"}
+       :producer-config {"key.serializer"
+                         "org.apache.kafka.common.serialization.StringSerializer",
+                         "value.serializer"
+                         "org.apache.kafka.common.serialization.StringSerializer"}
+       :consumer-config {"key.deserializer"
+                         "org.apache.kafka.common.serialization.StringDeserializer"
+                         "value.deserializer"
+                         "org.apache.kafka.common.serialization.StringDeserializer"}}
+      :kafka-topic "test"}))
+  (p/start t)
+  (p/set-offset! t 0)
+  (p/poll t)
+  @(:state t)
+  (p/stop t)
+  )
 
 
 

@@ -52,7 +52,8 @@
   (interceptor/interceptor
    {:name ::commit-kafka-transaction
     :leave (fn [event]
-             (if (:kafka-cluster processor)
+             (if (and (:kafka-cluster processor)
+                      (::event/consumer-group event))
                (.commitTransaction @(:producer processor)))
              event)}))
 
@@ -103,7 +104,8 @@
   (interceptor/interceptor
    {:name ::open-kafka-transaction
     :leave (fn [event]
-             (if (:kafka-cluster processor)
+             (if (and (:kafka-cluster processor)
+                      (::event/consumer-group event))
                (.beginTransaction @(:producer processor)))
              event)}))
 

@@ -1,17 +1,17 @@
 (ns genegraph.framework.app
-    "Core include refrerencing all necessary dependencies"
-    (:require #_[genegraph.framework.topic :as topic]
-              [genegraph.framework.processor :as processor]
-              [genegraph.framework.protocol :as p]
-              [genegraph.framework.storage :as s]
-              [genegraph.framework.storage.console-writer]
-              [genegraph.framework.storage.rocksdb]
-              [genegraph.framework.storage.rdf]
-              [genegraph.framework.storage.gcs]
-              [genegraph.framework.kafka :as kafka]
-              [genegraph.framework.topic :as topic]
-              [genegraph.framework.event :as event]
-              [clojure.spec.alpha :as spec]))
+  "Core include refrerencing all necessary dependencies"
+  (:require #_[genegraph.framework.topic :as topic]
+            [genegraph.framework.processor :as processor]
+            [genegraph.framework.protocol :as p]
+            [genegraph.framework.storage :as s]
+            [genegraph.framework.storage.console-writer]
+            [genegraph.framework.storage.rocksdb]
+            [genegraph.framework.storage.rdf]
+            [genegraph.framework.storage.gcs]
+            [genegraph.framework.kafka :as kafka]
+            [genegraph.framework.topic :as topic]
+            [genegraph.framework.event :as event]
+            [clojure.spec.alpha :as spec]))
 
 (spec/def ::app
   (spec/keys :req-un [::topics]))
@@ -117,8 +117,9 @@
                  :interceptors `[test-interceptor-fn]}}})
 
 (defn test-interceptor-fn [event]
-  (println "test-interceptor-fn " (::event/key event))
-  (-> event
+  (println "test-interceptor-fn " (::event/offset event ) ":" (::event/key event))
+  event
+  #_(-> event
       (event/publish {::event/key (str "new-" (::event/key event))
                       ::event/data {:hgvs "NC_00000001:50000A>C"}
                       ::event/topic :test-endpoint})))
@@ -144,6 +145,11 @@
              :kafka-consumer-group "testcg9"
              :kafka-cluster :local
              :kafka-topic "test"}
+            :test-reader
+            {:name :test-reader
+             :type :kafka-reader-topic
+             :kafka-cluster :local
+             :kafka-topic "test"}
             :test-endpoint
             {:name :test-endpoint
              :type :kafka-producer-topic
@@ -164,7 +170,7 @@
               :name :test-rocksdb
               :path "/users/tristan/desktop/test-rocks"}}
    :processors {:test-processor
-                {:subscribe :test-topic
+                {:subscribe :test-reader
                  :name :test-processor
                  :type :processor
                  :kafka-cluster :local
@@ -185,16 +191,21 @@
   (p/start a2)
   (-> a2
       :topics
-      :test-topic
+      :test-reader
       :state
       deref)
+  (-> a2
+      :topics
+      :test-topic
+      kafka/kafka-position)
   (p/publish (get-in a2 [:topics :publish-to-test])
              {:payload
-              {::event/key "k15"
-               ::event/value "v18"
+              {::event/key "k18"
+               ::event/value "v19"
                ::event/topic :test-topic}
               #_#_#_#_::event/skip-local-effects true
               ::event/skip-publish-effects true})
+
   (s/store-offset @(get-in a2 [:storage :test-rocksdb :instance]) :test-topic 1)
   (s/retrieve-offset @(get-in a2 [:storage :test-rocksdb :instance]) :test-topic)
   (processor/starting-offset (get-in a2 [:processors :test-processor]))

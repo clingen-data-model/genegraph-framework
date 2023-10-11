@@ -18,17 +18,12 @@
 
 (defprotocol Offsets
   "For topics supporting offsets"
-  (offset [this] "Local offset for topic")
-  (last-available-offset [this] "Last available offset for topic")
-  (last-committed-offset [this]
-    "Last offset committed for this topic, e.g. the current
-consumer group offset.")
-  (set-offset! [this offset] "Set local offset for topic")
-  (committed-offset [this] "Committed offset for topic."))
+  (set-offset! [this offset] "Set local offset for topic"))
 
 (defn exception
   "Registers exception e occurred in entity this"
   [this e]
+  (println "exception " (type e) " in " (:name this) )
   (swap! (:state this)
          assoc
          :status :exception
