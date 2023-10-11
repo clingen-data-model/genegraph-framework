@@ -157,10 +157,14 @@
       interceptor-chain/execute))
 
 (defn initial-offset
-  "Return starting offset for subscribed topic from backing store"
+  "Return starting offset for subscribed topic from backing store.
+  Note that initial offset will be one slot past the offset for
+  the last read record."
   [processor]
   (if-let [backing-store (backing-store-instance processor)]
-    (s/retrieve-offset backing-store (:subscribe processor))
+    (let [o (s/retrieve-offset backing-store (:subscribe processor))]
+      (println "initial offset " o)
+      (if (= ::s/miss o) 0 (+ 1 o)))
     nil))
 
 ;; name -- name of processor

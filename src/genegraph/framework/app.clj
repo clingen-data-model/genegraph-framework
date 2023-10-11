@@ -211,4 +211,4 @@
   (processor/starting-offset (get-in a2 [:processors :test-processor]))
   (get-in a2 [:processors :test-processor :storage :test-rocksdb :instance])
   (p/stop a2)
-)
+  )

@@ -123,6 +123,9 @@
    (create-local-kafka-consumer topic @(:initial-local-offset @(:state topic))))
   ([topic initial-offset]
    (let [topic-partition (TopicPartition. (:kafka-topic topic) 0)]
+     (println "create-local-kafka-consumer "
+              topic-partition "\n"
+              initial-offset)
      (doto (create-kafka-consumer topic)
        (.assign [topic-partition])
        (.seek topic-partition initial-offset)))))
@@ -178,8 +181,8 @@
     (onPartitionsAssigned [_ partitions]
       (deliver (:initial-consumer-group-offset @(:state topic))
                (last-committed-offset topic)))
-    #_(onPartitionsLost [_ partitions] [])
-    #_(onPartitionsRevoked [_ partitions] [])))
+    (onPartitionsLost [_ partitions] [])
+    (onPartitionsRevoked [_ partitions] [])))
 
 
 (defrecord KafkaConsumerGroupTopic
