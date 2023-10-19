@@ -1,6 +1,6 @@
 (ns genegraph.framework.app
   "Core include refrerencing all necessary dependencies"
-  (:require #_[genegraph.framework.topic :as topic]
+  (:require [genegraph.framework.http-server]
             [genegraph.framework.processor :as processor]
             [genegraph.framework.protocol :as p]
             [genegraph.framework.storage :as s]
@@ -11,23 +11,26 @@
             [genegraph.framework.kafka :as kafka]
             [genegraph.framework.topic :as topic]
             [genegraph.framework.event :as event]
+            [io.pedestal.http :as http]
             [clojure.spec.alpha :as spec]))
 
 (spec/def ::app
   (spec/keys :req-un [::topics]))
 
-(defrecord App [topics storage processors]
+(defrecord App [topics storage processors http-servers]
 
   p/Lifecycle
   (start [this]
     (run! #(when (satisfies? p/Lifecycle %) (p/start %))
           (concat (vals storage)
                   (vals topics)
-                  (vals processors)))
+                  (vals processors)
+                  (vals http-servers)))
     this)
   (stop [this]
     (run! #(when (satisfies? p/Lifecycle %) (p/stop %))
-          (concat (vals processors)
+          (concat (vals http-servers)
+                  (vals processors)
                   (vals storage)
                   (vals topics)))
     this))
@@ -58,6 +61,22 @@
    update-vals
    #(merge % (select-keys app [:topics :storage :kafka-clusters]))))
 
+(defn- replace-kw-ref-for-http-server [server app]
+  (println "replace-kw-ref-for-http-server " (type server))
+  (assoc server
+         :endpoints
+         (mapv (fn [ep]
+                 (println "endpoint " ep)
+                 (update ep :processor (fn [p] (get-in app [:processors p]))))
+               (:endpoints server))))
+
+(defn- add-processor-refs-to-endpoints [app]
+  (update
+   app
+   :http-servers
+   update-vals
+   #(replace-kw-ref-for-http-server % app)))
+
 (defmethod p/init :genegraph-app [app]
   (-> app
       (add-kafka-cluster-refs :topics)
@@ -65,6 +84,8 @@
       (init-components [:topics :storage])
       (add-topic-and-storage-refs :processors)
       (init-components [:processors])
+      add-processor-refs-to-endpoints
+      (init-components [:http-servers])
       map->App))
 
 ;;;;;
@@ -127,6 +148,12 @@
 (defn test-publisher-fn [event]
   (event/publish event (:payload event)))
 
+(defn test-endpoint-fn [event]
+  (assoc event
+         :response
+         {:status 200
+          :body "Hello, flower"}))
+
 (def app-def-2
   {:type :genegraph-app
    :kafka-clusters {:local
@@ -138,7 +165,7 @@
                      :consumer-config {"key.deserializer"
                                        "org.apache.kafka.common.serialization.StringDeserializer"
                                        "value.deserializer"
-                                     "org.apache.kafka.common.serialization.StringDeserializer"}}}
+                                       "org.apache.kafka.common.serialization.StringDeserializer"}}}
    :topics {:test-topic
             {:name :test-topic
              :type :kafka-consumer-group-topic
@@ -168,26 +195,40 @@
    :storage {:test-rocksdb
              {:type :rocksdb
               :name :test-rocksdb
-              :path "/users/tristan/desktop/test-rocks"}}
+              :path "/users/tristan/desktop/test-rocks"}
+             :test-jena
+             {:type :rdf
+              :name :test-jena
+              :path "/users/tristan/desktop/test-jena"}}
    :processors {:test-processor
                 {:subscribe :test-reader
                  :name :test-processor
                  :type :processor
                  :kafka-cluster :local
-                 :backing-store :test-rocksdb
+                 :backing-store :test-jena
                  :interceptors `[test-interceptor-fn]}
                 :test-publisher
                 {:name :test-publisher
                  :subscribe :publish-to-test
                  :kafka-cluster :local
                  :type :processor
-                 :interceptors `[test-publisher-fn]}}
-   :api-endpoint {"/" :test-processor
-                  "/graphql" :graphql-processor}})
-
+                 :interceptors `[test-publisher-fn]}
+                :test-endpoint
+                {:name :test-endpoint
+                 :type :processor
+                 :interceptors `[test-endpoint-fn]}}
+   :http-servers {:test-server
+                  {:type :http-server
+                   :name :test-server
+                   :endpoints [{:path "/hello"
+                                :processor :test-endpoint}]
+                   ::http/type :jetty
+                   ::http/port 8888
+                   ::http/join? false}}})
 (comment
 
   (def a2 (p/init app-def-2))
+  a2
   (p/start a2)
   (-> a2
       :topics

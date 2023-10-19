@@ -20,6 +20,11 @@
   "For topics supporting offsets"
   (set-offset! [this offset] "Set local offset for topic"))
 
+(defprotocol EventProcessor
+  "Protocol for processor objects"
+  (process [this event] "Process event, including side effects")
+  (interceptors [this] "Vector of interceptors for this processor"))
+
 (defn exception
   "Registers exception e occurred in entity this"
   [this e]

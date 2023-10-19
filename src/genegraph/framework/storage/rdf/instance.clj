@@ -4,11 +4,40 @@
   (:require [genegraph.framework.storage :as s])
   (:import [org.apache.jena.tdb2 TDB2Factory]
            [org.apache.jena.query Dataset ReadWrite TxnType]
-           [org.apache.jena.rdf.model Model Resource]
+           [org.apache.jena.rdf.model Model Resource ResourceFactory
+            ModelFactory]
            [java.util.concurrent BlockingQueue ArrayBlockingQueue TimeUnit]
            [java.util List ArrayList]
            [org.apache.jena.query.text TextDatasetFactory]))
 
+(def most-recent-offset
+  (ResourceFactory/createProperty "http://genegraph/mostRecentOffset"))
+
+(defn topic-kw->iri [kw]
+  (let [ns-str (if (namespace kw) (str (namespace kw) "/") "")]
+    (ResourceFactory/createResource
+     (str "http://genegraph/topic/" ns-str (name kw)))))
+
+(defn offset->model
+  "Encapsulate an offset for a topic in a Jena model,
+  supports the TopicBackingStore interface."
+  [topic offset]
+  (doto (ModelFactory/createDefaultModel)
+    (.add
+     (ResourceFactory/createStatement
+      (topic-kw->iri topic)
+      most-recent-offset
+      (ResourceFactory/createTypedLiteral offset)))))
+
+(defn model->offset
+  "From the model for a given topic, return the most recent offset."
+  [model]
+  (->> (.listObjectsOfProperty model most-recent-offset)
+       iterator-seq
+       (mapv #(-> % .asLiteral .getLong))
+       first))
+
+#_(model->offset (offset->model :test-topic 42))
 
 (defrecord PersistentDataset [dataset
                               run-atom
@@ -49,6 +78,17 @@
     (.put queue {:command :delete
                  :model-name k
                  :commit-promise commit-promise}))
+
+  s/TopicBackingStore
+  (store-offset [this topic offset]
+    (s/write this
+             (topic-kw->iri topic)
+             (offset->model topic offset)))
+  (retrieve-offset [this topic]
+    (.begin this ReadWrite/READ)
+    (let [o (model->offset (s/read this (topic-kw->iri topic)))]
+      (.end this)
+      o))
 
   ;; The rest is just boilerplate to pass through calls to the Dataset
   ;; interface to the underlying Dataset object. Ideally the need for this

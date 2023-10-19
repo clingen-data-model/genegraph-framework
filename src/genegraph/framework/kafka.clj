@@ -123,9 +123,6 @@
    (create-local-kafka-consumer topic @(:initial-local-offset @(:state topic))))
   ([topic initial-offset]
    (let [topic-partition (TopicPartition. (:kafka-topic topic) 0)]
-     (println "create-local-kafka-consumer "
-              topic-partition "\n"
-              initial-offset)
      (doto (create-kafka-consumer topic)
        (.assign [topic-partition])
        (.seek topic-partition initial-offset)))))

@@ -135,9 +135,8 @@
      {:enter (var-get (resolve v))})
     (interceptor/interceptor v)))
 
-(defn add-interceptors [event processor]
-  (interceptor-chain/enqueue
-   event
+(defn interceptors-for-processor [processor]
+  (vec
    (concat
     [(metadata-interceptor processor)
      (storage-interceptor processor)
@@ -149,6 +148,9 @@
      (open-kafka-transaction-interceptor processor)
      deserialize-interceptor]
     (mapv ->interceptor (:interceptors processor)))))
+
+(defn add-interceptors [event processor]
+  (interceptor-chain/enqueue event (interceptors-for-processor processor)))
 
 (defn process-event [processor event]
   (-> event
@@ -163,9 +165,14 @@
   [processor]
   (if-let [backing-store (backing-store-instance processor)]
     (let [o (s/retrieve-offset backing-store (:subscribe processor))]
-      (println "initial offset " o)
-      (if (= ::s/miss o) 0 (+ 1 o)))
+      (case o
+        nil 0
+        ::s/miss 0
+        (+ 1 o)))
     nil))
+
+
+
 
 ;; name -- name of processor
 ;; subscribe -- topic to source events from
@@ -188,15 +195,19 @@
                       backing-store
                       init-fn]
 
+  p/EventProcessor
+  (process [this event] (process-event this event))
+  (interceptors [this] (interceptors-for-processor this))
+
   p/Lifecycle
   (start [this]
     (reset! (:state this) :running)
     ;; start producer first, else race condition
     (if kafka-cluster
       (deliver producer
-              (kafka/create-producer
-               kafka-cluster
-               {"transactional.id" (str name)}))
+               (kafka/create-producer
+                kafka-cluster
+                {"transactional.id" (str name)}))
       (deliver producer nil))
     (when-let [subscribed-topic (get-subscribed-topic this)]
       (when (satisfies? p/Offsets subscribed-topic)
