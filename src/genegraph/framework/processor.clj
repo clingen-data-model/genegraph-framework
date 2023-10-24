@@ -52,8 +52,7 @@
   (interceptor/interceptor
    {:name ::commit-kafka-transaction
     :leave (fn [event]
-             (if (and (:kafka-cluster processor)
-                      (::event/consumer-group event))
+             (if (:kafka-cluster processor)
                (.commitTransaction @(:producer processor)))
              event)}))
 
@@ -61,7 +60,8 @@
   (interceptor/interceptor
    {:name ::commit-kafka-offset
     :leave (fn [event]
-             (if (:kafka-cluster processor)
+             (if (and (:kafka-cluster processor)
+                      (::event/consumer-group event))
                (when (and (::event/consumer-group event)
                           (::event/offset event)
                           (::event/kafka-topic event))
@@ -104,8 +104,7 @@
   (interceptor/interceptor
    {:name ::open-kafka-transaction
     :leave (fn [event]
-             (if (and (:kafka-cluster processor)
-                      (::event/consumer-group event))
+             (if (:kafka-cluster processor)
                (.beginTransaction @(:producer processor)))
              event)}))
 
@@ -142,7 +141,7 @@
      (storage-interceptor processor)
      (add-backing-store-interceptor processor)
      commit-local-offset-interceptor
-     (commit-kafka-transaction-interceptor processor)
+     (commit-kafka-transaction-interceptor processor) ;; rename to sendoffsetstotransaction
      (commit-kafka-offset-interceptor processor)
      (publish-interceptor processor)
      (open-kafka-transaction-interceptor processor)

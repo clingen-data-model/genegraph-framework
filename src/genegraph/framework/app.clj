@@ -246,10 +246,10 @@
                ::event/topic :test-topic}
               #_#_#_#_::event/skip-local-effects true
               ::event/skip-publish-effects true})
-
   (s/store-offset @(get-in a2 [:storage :test-rocksdb :instance]) :test-topic 1)
   (s/retrieve-offset @(get-in a2 [:storage :test-rocksdb :instance]) :test-topic)
   (processor/starting-offset (get-in a2 [:processors :test-processor]))
   (get-in a2 [:processors :test-processor :storage :test-rocksdb :instance])
   (p/stop a2)
+
   )

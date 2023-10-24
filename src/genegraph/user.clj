@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [clojure.set :as s]
             [clojure.data.json :as json]
+            [genegraph.framework.kafka :as kafka]
             [genegraph.framework.protocol :as p]
             [genegraph.framework.event :as event]
             [genegraph.framework.event.store :as event-store]
@@ -273,4 +274,39 @@
   (keys gv/gene-validity-transform)
   (:state gv/gene-validity-transform)
   (p/stop gv/gene-validity-transform)
+  )
+
+
+(comment
+
+  (def dx-ccloud
+    {:type :kafka-cluster
+     :common-config {"ssl.endpoint.identification.algorithm" "https"
+                     "sasl.mechanism" "PLAIN"
+                     "request.timeout.ms" "20000"
+                     "bootstrap.servers" "pkc-4yyd6.us-east1.gcp.confluent.cloud:9092"
+                     "retry.backoff.ms" "500"
+                     "security.protocol" "SASL_SSL"
+                     "sasl.jaas.config" (System/getenv "DX_JAAS_CONFIG")}
+     :consumer-config {"key.deserializer"
+                       "org.apache.kafka.common.serialization.StringDeserializer"
+                       "value.deserializer"
+                       "org.apache.kafka.common.serialization.StringDeserializer"}
+     :producer-config {"key.serializer"
+                       "org.apache.kafka.common.serialization.StringSerializer"
+                       "value.serializer"
+                       "org.apache.kafka.common.serialization.StringSerializer"}})
+  
+  (kafka/topic->event-file
+   {:name :gv-raw
+    :type :kafka-reader-topic
+    :kafka-cluster dx-ccloud
+    :kafka-topic "gene_validity_raw"}
+   "/users/tristan/desktop/gv_events.edn.gz")
+
+  (event-store/with-event-reader [r "/users/tristan/desktop/gv_events.edn.gz"]
+    (-> (event-store/event-seq r)
+        first
+        ::event/timestamp
+        Instant/ofEpochMilli))
   )

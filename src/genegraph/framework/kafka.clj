@@ -1,6 +1,7 @@
 (ns genegraph.framework.kafka
   (:require [genegraph.framework.protocol :as p]
-            [genegraph.framework.event :as event])
+            [genegraph.framework.event :as event]
+            [genegraph.framework.event.store :as event-store])
   (:import [org.apache.kafka.clients.admin Admin NewTopic CreateTopicsResult OffsetSpec]
            [org.apache.kafka.clients.producer Producer KafkaProducer ProducerRecord]
            [org.apache.kafka.clients.consumer Consumer KafkaConsumer ConsumerGroupMetadata
@@ -9,9 +10,7 @@
            [java.time Duration]
            [java.util.concurrent BlockingQueue ArrayBlockingQueue TimeUnit]))
 
-;; TODO Start here
-;; Cleanup and test KafkaReaderTopic
-;; 
+
 
 (defn create-producer [cluster-def opts]
   (doto (KafkaProducer.
@@ -30,22 +29,33 @@
     event
     (catch Exception e (assoc event ::event/error true))))
 
-(defn create-admin [cluster-def]
-  (Admin/create (:common-config cluster-def)))
+
 
 (defn event->producer-record
   [{topic ::event/kafka-topic
     k ::event/key
-    v ::event/value}]
-  (if k
-    (ProducerRecord. topic k v)
-    (ProducerRecord. topic v)))
+    v ::event/value
+    partition ::event/partition
+    ts ::event/timestamp
+    :or {partition 0, ts (System/currentTimeMillis)}}]
+  (ProducerRecord. topic
+                   (int partition)
+                   ts
+                   k
+                   v))
+
+(event->producer-record {::event/kafka-topic "test"
+                         ::event/key "k"
+                         ::event/value "v"
+                         ::event/partition 0
+                         ::event/timestamp (System/currentTimeMillis)})
 
 (defn consumer-record->event [record]
   {::event/key (.key record)
    ::event/value (.value record)
    ::event/timestamp (.timestamp record)
    ::event/kafka-topic (.topic record)
+   ::event/partition (.partition record)
    ::event/source :kafka
    ::event/offset (.offset record)})
 
@@ -115,7 +125,8 @@
   ([topic consumer]
    (.position consumer
               (TopicPartition. (:kafka-topic topic) 0)
-              (Duration/ofMillis (:timeout topic)))))
+              (Duration/ofMillis (or (:timeout topic)
+                                     (:timeout topic-defaults))))))
 
 (defn create-local-kafka-consumer
   "Create a local Kafka consumer, initialzed to initial-offset"
@@ -146,6 +157,38 @@
                  (run! #(deliver-event topic %))))
           (.unsubscribe consumer)))
       (catch Exception e (p/exception topic e)))))
+
+(defn end-offset [consumer]
+  (-> (.endOffsets consumer (.assignment consumer)) first val))
+
+(defn topic->event-file
+  "Copy the events in a kafka-backed topic to an event seq file."
+  [topic event-store-handle]
+  (with-open [consumer (create-local-kafka-consumer (p/init topic) 0)]
+    (event-store/with-event-writer [ew event-store-handle]
+      (loop [events (poll-kafka-consumer consumer)]
+        (run! prn events)
+        (when (< (kafka-position topic consumer) (end-offset consumer))
+          (recur (poll-kafka-consumer consumer)))))))
+
+(comment
+  (topic->event-file
+   {:name :test-reader
+    :type :kafka-reader-topic
+    :kafka-cluster {:common-config {"bootstrap.servers" "localhost:9092"}
+                    :producer-config {"key.serializer"
+                                      "org.apache.kafka.common.serialization.StringSerializer",
+                                      "value.serializer"
+                                      "org.apache.kafka.common.serialization.StringSerializer"}
+                    :consumer-config {"key.deserializer"
+                                      "org.apache.kafka.common.serialization.StringDeserializer"
+                                      "value.deserializer"
+                                      "org.apache.kafka.common.serialization.StringDeserializer"}}
+    :kafka-topic "test"}
+   "/users/tristan/desktop/gv_events.edn.gz")
+  (event-store/with-event-reader [r "/users/tristan/desktop/gv_events.edn.gz"]
+    (count (event-store/event-seq r)))
+  )
 
 (defn update-local-storage!
   "Check to see if the most recently stored events in local storage are

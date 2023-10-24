@@ -1,6 +1,6 @@
 (ns genegraph.framework.storage.filesystem
   "Methods for incorporating a filesystem into the Genegraph storage framework.
-  Currently supported primarily for the purpose of "
+  Currently supported primarily for the purpose of local testing."
   (:require [genegraph.framework.storage :as storage]
             [clojure.java.io :as io])
   (:import [java.io OutputStream InputStream File]))
