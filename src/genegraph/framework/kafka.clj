@@ -38,16 +38,12 @@
     partition ::event/partition
     ts ::event/timestamp
     :or {partition 0, ts (System/currentTimeMillis)}}]
-  (ProducerRecord. topic
-                   (int partition)
-                   ts
-                   k
-                   v))
+  (ProducerRecord. topic (int partition) ts k v))
 
 (event->producer-record {::event/kafka-topic "test"
-                         ::event/key "k"
+                         #_#_ ::event/key "k"
                          ::event/value "v"
-                         ::event/partition 0
+                         #_#_::event/partition 0
                          ::event/timestamp (System/currentTimeMillis)})
 
 (defn consumer-record->event [record]
@@ -110,9 +106,14 @@
   (let [state @(:state topic)
         local-offset (deref (:initial-local-offset state) 100 :timeout)
         cg-offset (deref (:initial-consumer-group-offset state) 100 :timeout)]
-    (if (or (= :timeout local-offset) (= :timeout cg-offset))
-      :timeout
-      (< local-offset cg-offset))))
+    (println "backing-store-lags-consumer-group? "
+             local-offset
+             " "
+             cg-offset)
+    (cond
+      (or (= :timeout local-offset) (= :timeout cg-offset)) :timeout
+      (and (number? local-offset) (number? cg-offset)) (< local-offset cg-offset)
+      :else false)))
 
 
 (defn kafka-position
@@ -219,6 +220,7 @@
 (defn consumer-rebalance-listener [topic]
   (reify ConsumerRebalanceListener
     (onPartitionsAssigned [_ partitions]
+      (println "consumer rebalance offsets " (last-committed-offset topic))
       (deliver (:initial-consumer-group-offset @(:state topic))
                (last-committed-offset topic)))
     (onPartitionsLost [_ partitions] [])

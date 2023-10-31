@@ -6,8 +6,6 @@
 (defn create-admin-client [cluster-def]
   (Admin/create (:common-config cluster-def)))
 
-
-
 (comment
   (def local-cluster
     {:common-config {"bootstrap.servers" "localhost:9092"}
@@ -26,5 +24,12 @@
                           (.configs {"retention.ms" "-1"}))])
         .all
         .get))
+
+  (with-open [admin (create-admin-client local-cluster)]
+    (-> (.deleteTopics admin ["gene_validity_complete"])
+        .all
+        .get))
+
+  
 
   )

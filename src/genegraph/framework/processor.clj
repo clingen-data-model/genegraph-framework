@@ -206,7 +206,8 @@
       (deliver producer
                (kafka/create-producer
                 kafka-cluster
-                {"transactional.id" (str name)}))
+                {"transactional.id" (str name)
+                 "max.request.size" (int (* 1024 1024 10))}))
       (deliver producer nil))
     (when-let [subscribed-topic (get-subscribed-topic this)]
       (when (satisfies? p/Offsets subscribed-topic)
