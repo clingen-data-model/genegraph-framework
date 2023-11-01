@@ -280,6 +280,6 @@
              append-context
              .getBytes
              ByteArrayInputStream.
-             (rdf/read-rdf {:format :json-ld}))))
+             (rdf/read-rdf :json-ld))))
 
 

@@ -26,6 +26,13 @@
         .get))
 
   (with-open [admin (create-admin-client local-cluster)]
+    (-> (.createTopics admin
+                       [(doto (NewTopic. "gene_validity_sepio" 1 (short 1))
+                          (.configs {"retention.ms" "-1"}))])
+        .all
+        .get))
+
+  (with-open [admin (create-admin-client local-cluster)]
     (-> (.deleteTopics admin ["gene_validity_complete"])
         .all
         .get))

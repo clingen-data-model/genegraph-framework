@@ -7,9 +7,10 @@
             [genegraph.framework.storage.rdf.types :as types]
             [genegraph.framework.storage.rdf.query :as query]
             [genegraph.framework.storage :as s]
+            [genegraph.framework.event :as event]
             [clojure.string :as string]
             [clojure.java.io :as io])
-  (:import [java.io ByteArrayOutputStream]
+  (:import [java.io ByteArrayOutputStream ByteArrayInputStream]
            [org.apache.jena.rdf.model Model Resource ModelFactory
             ResourceFactory Statement]
            [org.apache.jena.tdb2 TDB2Factory]
@@ -50,13 +51,22 @@
 (def jena-rdf-format
   {:rdf-xml "RDF/XML"
    :json-ld "JSON-LD"
-   :turtle "Turtle"})
+   :turtle "Turtle"
+   ::rdf-xml "RDF/XML"
+   ::json-ld "JSON-LD"
+   ::turtle "Turtle"
+   ::n-triples "N-TRIPLES"})
+
+(derive ::rdf-xml ::rdf-serialization)
+(derive ::json-ld ::rdf-serialization)
+(derive ::turtle ::rdf-serialization)
+(derive ::n-triples ::rdf-serialization)
 
 (defn ^Model read-rdf
   "Accepts an InputStream, Reader, or String (resource path) to read into a Model"
-  ([src] (read-rdf src {}))
-  ([src opts] (-> (ModelFactory/createDefaultModel)
-                  (.read src nil (jena-rdf-format (:format opts :rdf-xml))))))
+  ([src] (read-rdf src ::rdf-xml))
+  ([src format] (-> (ModelFactory/createDefaultModel)
+                    (.read src nil (get jena-rdf-format format)))))
 
 (defn resource [x]
   (types/resource x))
@@ -112,42 +122,32 @@
   [^Model model-one ^Model model-two]
   (.isIsomorphicWith model-one model-two))
 
+;; Event serialization/deserialization methods
+
+(defmethod event/deserialize ::rdf-serialization [event]
+  (assoc event
+         ::event/data
+         (read-rdf (-> event
+                       ::event/value
+                       .getBytes
+                       ByteArrayInputStream.)
+                   (::event/format event))))
+
+(defmethod event/serialize ::rdf-serialization [event]
+  (let [os (ByteArrayOutputStream.)]
+    (.write (::event/data event)
+            os
+            (get jena-rdf-format (::event/format event)))
+    (assoc event ::event/value (.toString os))))
+
 (comment
+  (-> {::event/format ::turtle
+       ::event/value (slurp "/users/tristan/data/genegraph-neo/base/dcterms.ttl")}
 
- (def m (read-rdf 
-"file:///users/tristan/data/genegraph/2023-04-13T1609/base/dcterms.ttl"
-                  {:format :turtle}))
+      event/deserialize
+      (select-keys [::event/data])
+      (assoc ::event/format ::n-triples)
+      event/serialize
+      ::event/value))
 
- (->> (iterator-seq (.listStatements m))
-      (map #(str (.getPredicate %)))
-      set
-      (map (fn [iri] [iri (names/iri->kw iri)]))
-      (take 5))
 
- (pp-model m)
-
- (-> :rdfs/subClassOf types/resource)
-
- (-> :dc/LicenseDocument
-     (types/resource m)
-     (types/ld1-> [:rdfs/label]))
-
- (-> :dc/RightsStatement
-     (types/resource m)
-     (types/ld-> [[:rdfs/subClassOf :<]]))
-
- (def q (q/create-query "select ?x where { ?x :rdfs/subClassOf ?c }"))
-
- (q m {:c :dc/RightsStatement})
-
- (def test-db
-   (-> {:name :test-rdf-dataset
-        :type :rdf
-        :path "/Users/tristan/Desktop/test-jena"}
-       (p/init)))
- (p/start test-db)
- (s/write @(:instance test-db) "http://example.db/" m (promise))
- (type @(:instance test-db))
- (tx @(:instance test-db) (println (s/read @(:instance test-db) "http://example.db/")))
- (time (tx @(:instance test-db) (into [] (q @(:instance test-db) {:c :dc/RightsStatement}))))
- (p/stop test-db))

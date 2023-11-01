@@ -22,7 +22,7 @@
   (assoc event ::data (edn/read-string (::value event))))
 
 (defmethod serialize :default [event]
-  event)
+  (assoc event ::value (::data event)))
 
 (defmethod serialize :json [event]
   (assoc event ::value (json/write-str (::data event))))

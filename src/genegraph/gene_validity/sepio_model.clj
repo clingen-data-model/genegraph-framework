@@ -14,7 +14,7 @@
    :pmbase "https://pubmed.ncbi.nlm.nih.gov/"
    :affbase "http://dataexchange.clinicalgenome.org/agent/"})
 
-(def gdm-sepio-relationships (rdf/read-rdf (str (io/resource "genegraph/gene_validity/sepio_model/gdm_sepio_relationships.ttl")) {:format :turtle}))
+(def gdm-sepio-relationships (rdf/read-rdf (str (io/resource "genegraph/gene_validity/sepio_model/gdm_sepio_relationships.ttl")) :turtle))
 
 (rdf/declare-query construct-proposition
                    construct-evidence-level-assertion
@@ -120,12 +120,3 @@
     (assoc event
            ::event/model
            pruned-model)))
-
-
-
-
-
-
-
-
-

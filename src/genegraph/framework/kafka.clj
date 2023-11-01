@@ -29,8 +29,6 @@
     event
     (catch Exception e (assoc event ::event/error true))))
 
-
-
 (defn event->producer-record
   [{topic ::event/kafka-topic
     k ::event/key
@@ -39,12 +37,6 @@
     ts ::event/timestamp
     :or {partition 0, ts (System/currentTimeMillis)}}]
   (ProducerRecord. topic (int partition) ts k v))
-
-(event->producer-record {::event/kafka-topic "test"
-                         #_#_ ::event/key "k"
-                         ::event/value "v"
-                         #_#_::event/partition 0
-                         ::event/timestamp (System/currentTimeMillis)})
 
 (defn consumer-record->event [record]
   {::event/key (.key record)
@@ -55,11 +47,16 @@
    ::event/source :kafka
    ::event/offset (.offset record)})
 
+(defn serialize [topic event]
+  )
+
 (defn publish [topic event]
   (.send
-     (::event/producer event)
-     (event->producer-record
-      (assoc event ::event/kafka-topic (:kafka-topic topic)))))
+   (::event/producer event)
+   (event->producer-record
+    (assoc event
+           ::event/kafka-topic (:kafka-topic topic)
+           ::event/format (:serialization topic)))))
 
 ;; TODO, rename or move to generic topic ns
 (defn poll
