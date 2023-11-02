@@ -12,7 +12,7 @@
             [clojure.java.io :as io])
   (:import [java.io ByteArrayOutputStream ByteArrayInputStream]
            [org.apache.jena.rdf.model Model Resource ModelFactory
-            ResourceFactory Statement]
+            ResourceFactory Statement Property]
            [org.apache.jena.tdb2 TDB2Factory]
            [org.apache.jena.query ReadWrite Query QueryFactory QueryExecutionFactory Dataset
             QuerySolutionMap]
@@ -70,6 +70,20 @@
 
 (defn resource [x]
   (types/resource x))
+
+(resource :sepio/ApproverRole)
+
+(defn ^Statement construct-statement
+  "Takes a [s p o] triple, returns a single Statement."
+  [[s p o]]
+  (ResourceFactory/createStatement
+   (resource s)
+   (cond (instance? Property p) p
+         (keyword? p) (ResourceFactory/createProperty (names/kw->iri p))
+         :else (ResourceFactory/createProperty p))
+   (if (or (string? o) (int? o) (float? o))
+     (ResourceFactory/createTypedLiteral o)
+     (resource o))))
 
 (defn create-query
   ([query-source] (create-query query-source {}))

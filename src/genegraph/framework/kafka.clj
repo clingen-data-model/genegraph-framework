@@ -47,16 +47,14 @@
    ::event/source :kafka
    ::event/offset (.offset record)})
 
-(defn serialize [topic event]
-  )
-
 (defn publish [topic event]
   (.send
    (::event/producer event)
-   (event->producer-record
-    (assoc event
-           ::event/kafka-topic (:kafka-topic topic)
-           ::event/format (:serialization topic)))))
+   (-> event
+       (assoc ::event/kafka-topic (:kafka-topic topic)
+              ::event/format (:serialization topic))
+       event/serialize
+       event->producer-record)))
 
 ;; TODO, rename or move to generic topic ns
 (defn poll
