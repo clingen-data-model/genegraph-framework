@@ -228,8 +228,8 @@
 
 (defmethod p/init :processor [processor-def]
   (-> processor-def
-      (assoc :state (atom :stopped))
-      (assoc :producer (promise))
+      (assoc :state (atom :stopped)
+             :producer (promise))
       map->Processor))
 
 

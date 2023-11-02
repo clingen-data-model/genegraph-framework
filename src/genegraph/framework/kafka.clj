@@ -74,12 +74,15 @@
 
 (defn poll-kafka-consumer
   "default method to poll a Kafka consumer for new records.
-  returns vector of events converted to Clojure data"
-  [consumer]
-  (->> (.poll consumer (Duration/ofMillis 100))
-       .iterator
-       iterator-seq
-       (mapv consumer-record->event)))
+  returns vector of events converted to Clojure data. Optionally
+  accepts a map M of metadata to append to consumer records."
+  ([consumer]
+   (poll-kafka-consumer consumer {}))
+  ([consumer m]
+   (->> (.poll consumer (Duration/ofMillis 100))
+        .iterator
+        iterator-seq
+        (mapv #(-> % consumer-record->event (merge m))))))
 
 (def topic-defaults
   {:timeout 1000
@@ -145,7 +148,9 @@
         (let [^KafkaConsumer consumer (create-local-kafka-consumer topic offset)]
           (while (and (= :running (:status @(:state topic)))
                       (< (kafka-position topic consumer) last-offset))
-            (->> (poll-kafka-consumer consumer)
+            (->> (poll-kafka-consumer
+                  consumer
+                  {::event/format (:serialization topic)})
                  (filter #(< (::event/offset %) last-offset))
                  (map #(assoc %
                               ::event/topic (:name topic)
@@ -162,10 +167,14 @@
   [topic event-store-handle]
   (with-open [consumer (create-local-kafka-consumer (p/init topic) 0)]
     (event-store/with-event-writer [ew event-store-handle]
-      (loop [events (poll-kafka-consumer consumer)]
+      (loop [events (poll-kafka-consumer
+                     consumer
+                     {::event/format (:serialization topic)})]
         (run! prn events)
         (when (< (kafka-position topic consumer) (end-offset consumer))
-          (recur (poll-kafka-consumer consumer)))))))
+          (recur (poll-kafka-consumer
+                  consumer
+                  {::event/format (:serialization topic)})))))))
 
 (comment
   (topic->event-file
@@ -196,11 +205,15 @@
   to be readable."
   [topic]
   (let [consumer (:kafka-consumer @(:state topic))]
-    (loop [events (poll-kafka-consumer consumer)]
+    (loop [events (poll-kafka-consumer
+                   consumer
+                   {::event/format (:serialization topic)})]
       (case (backing-store-lags-consumer-group? topic)
         true (do (produce-local-events topic) events)
         false events
-        :timeout (recur (poll-kafka-consumer consumer))))))
+        :timeout (recur (poll-kafka-consumer
+                         consumer
+                         {::event/format (:serialization topic)}))))))
 
 (defn last-committed-offset [topic]
   (let [consumer (:kafka-consumer @(:state topic))]
@@ -253,7 +266,9 @@
                                ::event/consumer-group kafka-consumer-group) )
                       events)
                 (when (= :running (:status @state))
-                  (recur (poll-kafka-consumer new-consumer))))
+                  (recur (poll-kafka-consumer
+                          new-consumer
+                          {::event/format (:serialization this)}))))
               (swap! state assoc :status :stopped)
               (.unsubscribe new-consumer)
               (catch Exception e (p/exception this e))))))))
@@ -316,7 +331,9 @@
           (let [^KafkaConsumer consumer (create-local-kafka-consumer this)]
             (swap! state assoc :kafka-consumer consumer)
             (while (= :running (:status @state))
-              (->> (poll-kafka-consumer consumer)
+              (->> (poll-kafka-consumer
+                    consumer
+                    {::event/format (:serialization this)})
                    (map #(assoc %
                                 ::event/topic name
                                 ::event/skip-publish-effects true))

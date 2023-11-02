@@ -203,16 +203,25 @@
 
 
 (defmethod storage/as-handle :gcs [def]
-  (.get (storage)
-        (BlobId/of (:bucket def)
-                   (str (:base def)
-                        (:path def)))))
+  (let [blob-id (BlobId/of (:bucket def) (str (:base def) (:path def)))]
+    (if-let [blob (.get (storage) blob-id)]
+      blob
+      (.create (storage)
+               (-> (BlobInfo/newBuilder blob-id)
+                   (.setContentType "text/plain")
+                   .build)
+               (make-array Storage$BlobTargetOption 0)))))
+
 
 (comment
   (slurp
    (storage/as-handle {:type :gcs
                        :bucket "genegraph-framework-dev"
                        :path "test.txt"}))
+
+  (storage/as-handle {:type :gcs
+                      :bucket "genegraph-framework-dev"
+                      :path "test12346.txt"} )
   (def s (slurp
           (storage/as-handle {:type :gcs
                               :bucket "genegraph-framework-dev"
