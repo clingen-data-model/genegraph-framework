@@ -97,15 +97,7 @@
   (def gcs-handle
     {:type :gcs
      :bucket "genegraph-framework-dev"})
-
-  (spit (storage/as-handle (assoc gcs-handle :path "k1234.txt"))
-        "test 1234")
-
-  (storage/as-handle (assoc gcs-handle :path "test.txt"))
   
-  (spit (storage/as-handle (assoc gcs-handle :path "test.txt"))
-        "this is a new test")
-
   (def fs-handle
     {:type :file
      :base "/users/tristan/data/genegraph-neo/"})
