@@ -1,9 +1,8 @@
-(ns genegraph.base
-  (:require [genegraph.base.transform.rdf]
-            [genegraph.framework.event]))
+(ns genegraph.gene-validity.base
+  (:require [hato.client :as hc]))
 
-;; These might be part of a common pattern
-
+(defn fetch-remote-data [event]
+  )
 
 
 

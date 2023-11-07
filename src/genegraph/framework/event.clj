@@ -50,6 +50,17 @@
              :args [(get-in event [::storage/storage instance]) k v commit-promise]
              :commit-promise commit-promise})))
 
+(defn delete
+  "Add deferred delete effect to event"
+  [event instance k]
+  (let [commit-promise (promise)]
+    (update event
+            ::effects
+            conj
+            {:command storage/delete
+             :args [(get-in event [::storage/storage instance]) k commit-promise]
+             :commit-promise commit-promise})))
+
 
 (defn publish
   "add deferred publish effect to event"

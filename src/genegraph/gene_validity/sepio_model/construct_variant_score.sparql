@@ -10,7 +10,7 @@ construct {
   :sepio/has-evidence ?evidenceItem , ?functionEvidenceItem ; # evidence about variant
   :sepio/calculated-score ?resultCalculatedScore ;
   :sepio/score-status ?scoreStatus ;
-  :dc/date-created ?dateCreated ;
+  :dc/created ?dateCreated ;
   :dc/description ?evidenceLineDescription .
 
 # Variant evidence item

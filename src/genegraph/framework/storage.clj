@@ -1,5 +1,6 @@
 (ns genegraph.framework.storage
   (:require [clojure.java.io :as io])
+  (:import [java.io ByteArrayInputStream])
   (:refer-clojure :exclude [read]))
 
 (defprotocol IndexedWrite
@@ -29,6 +30,11 @@
 
 (defmethod as-handle :file [def]
   (io/file (:base def) (:path def)))
+
+(defn ->input-stream [source]
+  (cond (map? source) (io/input-stream (as-handle source))
+        (string? source) (ByteArrayInputStream. (.getBytes source))
+        :else (io/input-stream source)))
 
 (comment
   (as-handle {:type :file

@@ -22,6 +22,12 @@
 (def instance-defaults
   {:queue-size 100})
 
+(defmulti as-model
+  "transform input into rdf model"
+  :format)
+
+
+
 (defrecord RDFStore [instance state queue-size text-assembly-path path]
   p/Lifecycle
   (start [this]
@@ -68,8 +74,18 @@
   ([src format] (-> (ModelFactory/createDefaultModel)
                     (.read src nil (get jena-rdf-format format)))))
 
+(defmethod as-model ::rdf-serialization [{:keys [source format]}]
+  (with-open [is (s/->input-stream source)]
+    (read-rdf is format)))
+
 (defn resource [x]
   (types/resource x))
+
+(defn ld1-> [r ks]
+  (types/ld1-> r ks))
+
+(defn ld-> [r ks]
+  (types/ld-> r ks))
 
 (resource :sepio/ApproverRole)
 
@@ -84,6 +100,13 @@
    (if (or (string? o) (int? o) (float? o))
      (ResourceFactory/createTypedLiteral o)
      (resource o))))
+
+(defn statements->model [statements]
+  (.add (ModelFactory/createDefaultModel)
+        (into-array Statement (map construct-statement statements))))
+
+(defn blank-node []
+  (ResourceFactory/createResource))
 
 (defn create-query
   ([query-source] (create-query query-source {}))

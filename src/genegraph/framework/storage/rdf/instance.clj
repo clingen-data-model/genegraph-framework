@@ -75,7 +75,7 @@
   (delete [this k]
     (s/delete this k nil))
   (delete [this k commit-promise]
-    (.put queue {:command :delete
+    (.put queue {:command :remove
                  :model-name k
                  :commit-promise commit-promise}))
 
@@ -143,11 +143,10 @@
   (transactionMode [this] (.transactionMode dataset))
   (transactionType [this] (.transactionType dataset)))
 
-
+;; TODO in case of error 
 (defn execute
   "Execute command on dataset"
   [dataset command]
-  ;; consider raising exception if bad command
   (case (:command command)
     :replace (.replaceNamedModel dataset
                                  (:model-name command)
@@ -205,10 +204,10 @@
              storage-def
              {:dataset (cond
                          (:assembly-path storage-def)
-                          (TextDatasetFactory/create (:assembly-path storage-def))
-                          (:path storage-def)
-                          (TDB2Factory/connectDataset (:path storage-def))
-                          :else (TDB2Factory/createDataset))
+                         (TextDatasetFactory/create (:assembly-path storage-def))
+                         (:path storage-def)
+                         (TDB2Factory/connectDataset (:path storage-def))
+                         :else (TDB2Factory/createDataset))
               :run-atom (atom true)
               :complete-promise (promise)
               :queue (ArrayBlockingQueue. (:queue-size storage-def))}))]

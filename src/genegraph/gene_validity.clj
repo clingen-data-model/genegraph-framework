@@ -9,6 +9,7 @@
             [genegraph.framework.storage.rdf :as rdf]
             [genegraph.gene-validity.gci-model :as gci-model]
             [genegraph.gene-validity.sepio-model :as sepio-model]
+            [genegraph.gene-validity.base :as base]
             [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.edn :as edn]))
@@ -17,6 +18,7 @@
 (def prop-query
   (rdf/create-query "select ?x where {?x a ?type}"))
 
+;; Deprecated (but maybe test first)
 (defn add-action [event]
   (assoc event
          ::event/action
@@ -47,6 +49,26 @@
 
 
 (def gv-event-path "/users/tristan/data/genegraph-neo/all_gv_events.edn.gz")
+
+(defn has-publish-action [m]
+  (< 0 (count ((rdf/create-query "select ?x where { ?x :bfo/realizes :cg/PublisherRole } ") m))))
+
+(defn store-curation [event]
+  (println
+   (str
+    (subs (::event/key event) 67)
+    " "
+    (has-publish-action (::event/data event))))
+  #_(println (keys event))
+  #_(spit (storage/as-handle (assoc (::handle event)
+                                    :path (str (subs (::event/key event) 67) ".nt")))
+          (::event/value
+           (event/serialize
+            (assoc event ::event/format ::rdf/n-triples))))
+  (if (has-publish-action (::event/data event))
+    (event/store event :gv-tdb (::event/key event) (::event/data event))
+    (event/delete event :gv-tdb (::event/key event)))
+)
 
 (comment
 
@@ -81,7 +103,6 @@
                     :name :gene-validity-processor
                     :interceptors `[gci-model/add-gci-model
                                     sepio-model/add-model
-                                    add-action
                                     add-iri
                                     add-publish-actions]}}}))
 
@@ -102,6 +123,10 @@
     {:type :file
      :base "/users/tristan/data/genegraph-neo/"})
 
+  (def base-fs-handle
+    {:type :file
+     :base "/users/tristan/data/genegraph-neo/new-base/"})
+
   (def gv-test-app
     (p/init
      {:type :genegraph-app
@@ -109,30 +134,71 @@
                {:name :gene-validity-gci
                 :type :simple-queue-topic}
                :gene-validity-sepio
-               {:name :gene-validity-sepiop
+               {:name :gene-validity-sepio
+                :type :simple-queue-topic}
+               :fetch-base-events
+               {:name :fetch-base-events
+                :type :simple-queue-topic}
+               :base-data
+               {:name :base-data
                 :type :simple-queue-topic}}
+      :storage {:gv-tdb
+                {:type :rdf
+                 :name :gv-tdb
+                 :path "/users/tristan/data/genegraph-neo/gv_tdb"}}
       :processors {:gene-validity-transform
                    {:type :processor
                     :name :gene-validity-processor
                     :subscribe :gene-validity-gci
                     :interceptors `[gci-model/add-gci-model
                                     sepio-model/add-model
-                                    add-action
                                     add-iri
                                     add-publish-actions]}
                    :gene-validity-sepio-reader
                    {:type :processor
                     :subscribe :gene-validity-sepio
                     :name :gene-validity-sepio-reader
-                    :interceptors `[print-key]
-                    ::event/metadata {::handle gcs-handle}}}}))
+                    :interceptors `[store-curation]
+                    ::event/metadata {::handle gcs-handle}}
+                   :fetch-base-file
+                   {:name :fetch-base-file
+                    :type :processor
+                    :subscribe :fetch-base-events
+                    :interceptors `[base/fetch-file
+                                    base/publish-base-file]
+                    ::event/metadata {::base/handle base-fs-handle}}
+                   :import-base-file
+                   {:name :import-base-file
+                    :type :processor
+                    :subscribe :base-data
+                    :interceptors `[base/read-base-data
+                                    base/store-model]}}}))
 
   (p/start gv-test-app)
   (p/stop gv-test-app)
+  
+  (->> (-> "base.edn" io/resource slurp edn/read-string)
+       #_(filter #(isa? (:format %) ::rdf/rdf-serialization))
+       #_(filter #(= "http://purl.obolibrary.org/obo/sepio.owl" (:name %)))
+       (map (fn [x] {::event/data x}))
+       (run! #(p/publish (get-in gv-test-app [:topics :fetch-base-events]) %)))
 
+  (let [db @(get-in gv-test-app [:storage :gv-tdb :instance])]
+    db
+    (rdf/tx db
+            ((rdf/create-query "select ?x where { ?x a :so/Gene } limit 5")
+             db)))
+
+
+  (let [db @(get-in gv-test-app [:storage :gv-tdb :instance])]
+    db
+    (rdf/tx db
+            (count ((rdf/create-query "select ?x where { ?x a ?t }")
+                    db
+                    {:t :sepio/GeneValidityEvidenceLevelAssertion}))))
+  
   (event-store/with-event-reader [r gv-event-path]
     (->> (event-store/event-seq r)
-         (take 3)
          (run! #(p/publish (get-in gv-test-app [:topics :gene-validity-gci]) %))))
   
   (def gene-validity-transform-processor
@@ -150,6 +216,7 @@
 
   (-> gene-validity-transform-processor
       :producer)
+  
   (kafka/topic->event-file
    (get-in gv-app [:topics :gene-validity-gci])
    "/users/tristan/data/genegraph-neo/all_gv_events.edn.gz")
@@ -160,12 +227,26 @@
 
   (event-store/with-event-reader [r gv-event-path]
     (->> (event-store/event-seq r)
+         #_(filter #(re-find #"7d595dc4" (::event/value %)))
+         #_(take 1)
+         #_(map #(-> %
+                     (assoc ::event/skip-local-effects true
+                            ::event/skip-publish-effects true)
+                     gv-xform
+                     ::event/publish))))
+
+  (event-store/with-event-reader [r gv-event-path]
+    (->> (event-store/event-seq r)
          (take 1)
+         
+         #_(filter #(re-find #"\"10\"" (::event/value %)))
+         #_count
+         
          (map #(-> %
-                   (assoc ::event/skip-local-effects true
-                          ::event/skip-publish-effects true)
-                   gv-xform
-                   ::event/publish))))
+                     (assoc ::event/skip-local-effects true
+                            ::event/skip-publish-effects true)
+                     gv-xform
+                     ::event/publish))))
   
   )
 
