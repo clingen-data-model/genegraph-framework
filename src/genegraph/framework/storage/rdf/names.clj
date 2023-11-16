@@ -1,12 +1,15 @@
 (ns genegraph.framework.storage.rdf.names
   "A module for translating keywords to IRIs used
   in RDF."
-  (:require [clojure.set :as s]))
+  (:require [clojure.set :as s])
+  (:import [org.apache.jena.shared PrefixMapping PrefixMapping$Factory]))
 
 (def global-aliases
   (atom {:prefixes {}
          :keyword-mappings {}
          :iri-mappings {}}))
+
+(def prefix-mapping (PrefixMapping$Factory/create))
 
 (defn add-keyword-mappings [aliases]
   (swap! global-aliases
@@ -15,6 +18,7 @@
               (update :iri-mappings merge (s/map-invert aliases)))))
 
 (defn add-prefixes [prefixes]
+  (.setNsPrefixes prefix-mapping prefixes)
   (swap! global-aliases update :prefixes merge prefixes))
 
 (defn kw->iri [kw]

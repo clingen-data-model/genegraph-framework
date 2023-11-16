@@ -17,7 +17,8 @@
   (:import [java.io File PushbackReader FileOutputStream BufferedWriter FileInputStream BufferedReader]
            [java.nio ByteBuffer]
            [java.time Instant OffsetDateTime]
-           [java.util.zip GZIPInputStream GZIPOutputStream]))
+           [java.util.zip GZIPInputStream GZIPOutputStream]
+           [java.util.concurrent ThreadPoolExecutor Executor LinkedBlockingQueue TimeUnit]))
 
 
 
@@ -418,3 +419,35 @@
 
 
  )
+
+;; Code for experimentation with thread pools and suchlike
+(comment
+  (time
+   (let [init-str "initializing fluff"]
+     (with-open [tpx (proxy [ThreadPoolExecutor]
+                         [(int 10)
+                          Integer/MAX_VALUE
+                          Long/MAX_VALUE
+                          TimeUnit/MILLISECONDS
+                          (LinkedBlockingQueue.)
+                          (.factory (Thread/ofVirtual))]
+                       
+                       (beforeExecute [^Thread t ^Runnable r]
+                         (proxy-super beforeExecute t r)
+                         #_(println init-str))
+
+                       (afterExecute [^Runnable r ^Throwable t]
+                         (proxy-super afterExecute r t)
+                         #_(println "ran fluff")))]
+
+       (dotimes [n 1000]
+         (.execute tpx #(do (spit (str "/users/tristan/data/crapdata" n ".edn")
+                                  (str (repeat 100000 "I will not throw spitballs at teacher.")))
+                            #_(println n)))))))
+
+
+  )
+
+(Thread/startVirtualThread #(println "Hello world!"))
+
+(repeat 10 "I will not throw spitballs at teacher.")

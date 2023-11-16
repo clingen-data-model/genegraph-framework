@@ -10,9 +10,16 @@
             [genegraph.gene-validity.gci-model :as gci-model]
             [genegraph.gene-validity.sepio-model :as sepio-model]
             [genegraph.gene-validity.base :as base]
+            [genegraph.gene-validity.graphql.schema :as gql-schema]
+            [com.walmartlabs.lacinia.pedestal2 :as lacinia-pedestal]
+            [io.pedestal.http :as http]
+            [io.pedestal.interceptor :as interceptor]
             [clojure.java.io :as io]
             [clojure.set :as set]
-            [clojure.edn :as edn]))
+            [clojure.edn :as edn])
+  (:import [org.apache.jena.rdf.model Model]
+           [org.apache.jena.query ReadWrite]
+           [java.util.concurrent LinkedBlockingQueue ThreadPoolExecutor TimeUnit]))
 
 
 (def prop-query
@@ -67,8 +74,52 @@
             (assoc event ::event/format ::rdf/n-triples))))
   (if (has-publish-action (::event/data event))
     (event/store event :gv-tdb (::event/key event) (::event/data event))
-    (event/delete event :gv-tdb (::event/key event)))
-)
+    (event/delete event :gv-tdb (::event/key event))))
+
+(def add-graphql-context-interceptor
+  "Make sure that graphql resolvers have access to storage, and
+  any other data needed from application."
+  (interceptor/interceptor
+   {:name ::add-graphql-context
+    :enter (fn [context]
+             (assoc-in context [:request :lacinia-app-context]
+                       (select-keys context [::storage/storage])))}))
+
+(def jena-transaction-interceptor
+  (interceptor/interceptor
+   {:name ::jena-transaction-interceptor
+    :enter (fn [context]
+             (let [gv-tdb (get-in context [::storage/storage :gv-tdb])]
+               (println "transaction interceptor "
+                        (-> (Thread/currentThread) .getId))
+               (.begin gv-tdb ReadWrite/READ)
+               (assoc-in context [:request :lacinia-app-context :db] gv-tdb)))
+    :leave (fn [context]
+             (println "transaction interceptor close "
+                        (-> (Thread/currentThread) .getId))
+             (.close (get-in context [:request :lacinia-app-context :db]))
+             context)}))
+
+(type (-> (Runtime/getRuntime) .availableProcessors))
+
+(defn graphql-executor
+  "Construct and return an Executor for handling GraphQL queries"
+  [tdb]
+  (let [pool-size (.availableProcessors (Runtime/getRuntime))]
+    (proxy [ThreadPoolExecutor]
+        [pool-size
+         pool-size
+         Long/MAX_VALUE
+         TimeUnit/MILLISECONDS
+         (LinkedBlockingQueue.)]
+      
+      (beforeExecute [^Thread t ^Runnable r]
+        (proxy-super beforeExecute t r)
+        )
+
+      (afterExecute [^Runnable r ^Throwable t]
+        (proxy-super afterExecute r t)
+        ))))
 
 (comment
 
@@ -158,8 +209,7 @@
                    {:type :processor
                     :subscribe :gene-validity-sepio
                     :name :gene-validity-sepio-reader
-                    :interceptors `[store-curation]
-                    ::event/metadata {::handle gcs-handle}}
+                    :interceptors `[store-curation]}
                    :fetch-base-file
                    {:name :fetch-base-file
                     :type :processor
@@ -172,7 +222,39 @@
                     :type :processor
                     :subscribe :base-data
                     :interceptors `[base/read-base-data
-                                    base/store-model]}}}))
+                                    base/store-model]}
+                   :graphql-api
+                   {:name :graphql-api
+                    :type :processor
+                    :interceptors [#_lacinia-pedestal/initialize-tracing-interceptor
+                                   lacinia-pedestal/json-response-interceptor
+                                   lacinia-pedestal/error-response-interceptor
+                                   lacinia-pedestal/body-data-interceptor
+                                   lacinia-pedestal/graphql-data-interceptor
+                                   lacinia-pedestal/status-conversion-interceptor
+                                   lacinia-pedestal/missing-query-interceptor
+                                   (lacinia-pedestal/query-parser-interceptor
+                                    gql-schema/schema)
+                                   lacinia-pedestal/disallow-subscriptions-interceptor
+                                   lacinia-pedestal/prepare-query-interceptor
+                                   jena-transaction-interceptor
+                                   #_lacinia-pedestal/enable-tracing-interceptor
+                                   lacinia-pedestal/query-executor-handler]}}
+      :http-servers {:gene-validity-server
+                     {:type :http-server
+                      :name :gene-validity-server
+                      :endpoints [{:path "/api"
+                                   :processor :graphql-api
+                                   :method :post}]
+                      ::http/routes
+                      (conj
+                       (lacinia-pedestal/graphiql-asset-routes "/assets/graphiql")
+                       ["/ide" :get (lacinia-pedestal/graphiql-ide-handler {})
+                        :route-name ::lacinia-pedestal/graphql-ide])
+                      ::http/type :jetty
+                      ::http/port 8888
+                      ::http/join? false
+                      ::http/secure-headers nil}}}))
 
   (p/start gv-test-app)
   (p/stop gv-test-app)
@@ -186,36 +268,57 @@
   (let [db @(get-in gv-test-app [:storage :gv-tdb :instance])]
     db
     (rdf/tx db
-            ((rdf/create-query "select ?x where { ?x a :so/Gene } limit 5")
-             db)))
+            (-> ((rdf/create-query "select ?x where { ?x a :so/Gene } limit 5")
+                 (rdf/resource "https://www.ncbi.nlm.nih.gov/gene/55847" db))
+                first)))
 
+
+
+  (let [db @(get-in gv-test-app [:storage :gv-tdb :instance])]
+    (rdf/tx db
+            (-> (rdf/resource "https://www.ncbi.nlm.nih.gov/gene/55847" db)
+                (rdf/ld-> [:skos/prefLabel]))))
+
+  (type @(get-in gv-test-app [:storage :gv-tdb :instance]))
+
+  (def moi-and-classification
+    (rdf/create-query
+     "select distinct ?a where { ?x a ?t ;
+:sepio/has-qualifier ?moi .
+?a :sepio/has-subject ?x ;
+a ?t2 ;
+:sepio/has-object ?classification ;
+:sepio/has-evidence + ?p .
+?p a ?t3}"))
 
   (let [db @(get-in gv-test-app [:storage :gv-tdb :instance])]
     db
     (rdf/tx db
-            (count ((rdf/create-query "select ?x where { ?x a ?t }")
-                    db
-                    {:t :sepio/GeneValidityEvidenceLevelAssertion}))))
+            (->
+             (moi-and-classification
+              db
+              {:t :sepio/GeneValidityProposition
+               :t2 :sepio/GeneValidityEvidenceLevelAssertion
+               :moi :hp/AutosomalRecessiveInheritance
+               :classification :sepio/ModerateEvidence
+               :t3 :sepio/NullVariantEvidenceLine})
+             count)))
+
+  (let [db @(get-in gv-test-app [:storage :gv-tdb :instance])]
+    (rdf/tx db
+            (->
+             ((rdf/create-query "select ?p where { ?p a ?t }")
+              db
+              {:t :sepio/NullVariantEvidenceLine})
+             first
+             (rdf/ld-> [[:sepio/has-evidence :<]
+                        [:sepio/has-evidence :<]]))))
+  
+
   
   (event-store/with-event-reader [r gv-event-path]
     (->> (event-store/event-seq r)
          (run! #(p/publish (get-in gv-test-app [:topics :gene-validity-gci]) %))))
-  
-  (def gene-validity-transform-processor
-    (p/init
-     {:type :processor
-      :name :gene-validity-processor
-      :interceptors `[gci-model/add-gci-model
-                      sepio-model/add-model
-                      add-action
-                      add-iri
-                      add-publish-actions]}))
-  
-  (p/start gene-validity-transform-processor)
-  (p/stop gene-validity-transform-processor)
-
-  (-> gene-validity-transform-processor
-      :producer)
   
   (kafka/topic->event-file
    (get-in gv-app [:topics :gene-validity-gci])
@@ -243,10 +346,11 @@
          #_count
          
          (map #(-> %
-                     (assoc ::event/skip-local-effects true
-                            ::event/skip-publish-effects true)
-                     gv-xform
-                     ::event/publish))))
+                   (assoc ::event/skip-local-effects true
+                          ::event/skip-publish-effects true)
+                   gv-xform
+                   ::event/publish))))
   
   )
 
+(-> (Runtime/getRuntime) .availableProcessors)

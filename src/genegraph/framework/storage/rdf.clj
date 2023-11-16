@@ -26,8 +26,6 @@
   "transform input into rdf model"
   :format)
 
-
-
 (defrecord RDFStore [instance state queue-size text-assembly-path path]
   p/Lifecycle
   (start [this]
@@ -78,8 +76,20 @@
   (with-open [is (s/->input-stream source)]
     (read-rdf is format)))
 
-(defn resource [x]
-  (types/resource x))
+(defn resource
+  ([x] (types/resource x))
+  ([x model]
+   (types/resource x model)))
+
+(defn model [x]
+  (types/model x))
+
+(defn ->kw
+  "Return the keyword associated with this resource (if any)"
+  [r]  (types/->kw r))
+
+(defn curie [iri]
+  (.qnameFor names/prefix-mapping (str iri)))
 
 (defn ld1-> [r ks]
   (types/ld1-> r ks))
@@ -87,7 +97,18 @@
 (defn ld-> [r ks]
   (types/ld-> r ks))
 
-(resource :sepio/ApproverRole)
+(defn objects-of-properties [r properties]
+  (reduce #(concat %1 (ld-> r [%2])) [] properties))
+
+(defn ld->*
+  "Return the attributes of r that match any property in ks"
+  [r ks]
+  (into [] (objects-of-properties r ks)))
+
+(defn ld1->*
+  "Return the first attribute of r that matches for a given property in ks"
+  [r ks]
+  (first (objects-of-properties r ks)))
 
 (defn ^Statement construct-statement
   "Takes a [s p o] triple, returns a single Statement."

@@ -11,7 +11,8 @@
             ResourceFactory
             AnonId
             Model
-            ModelFactory]
+            ModelFactory
+            RDFNode]
            [java.io
             ByteArrayOutputStream
             ByteArrayInputStream]
@@ -25,8 +26,8 @@
 (defprotocol Steppable
   (step [edge start]))
 
-(defprotocol AsReference
-  (to-ref [resource]))
+(defprotocol AsKeyword
+  (->kw [resource]))
 
 (defprotocol AsClojureType
   (to-clj [x]))
@@ -74,7 +75,13 @@
                                  (filter seq) flatten))
                           [this] 
                           ks))
-  (ld1-> [this ks] (first (ld-> this ks))))
+  (ld1-> [this ks] (first (ld-> this ks)))
+
+  AsKeyword
+  (->kw [this] (names/iri->kw (str this)))
+
+  AsModel
+  (model [this] (.getModel this)))
 
 (defn- compose-object-for-datafy [o]
   (cond (instance? Literal o) (.toString o)
@@ -99,7 +106,7 @@
   org.apache.jena.rdf.model.Resource
   (resource
     ([r] r)
-    ([r model] (.inModel r (model model)))))
+    ([r m] (.inModel r (model m)))))
 
 
 

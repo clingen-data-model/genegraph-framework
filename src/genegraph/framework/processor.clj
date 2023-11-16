@@ -129,10 +129,10 @@
   this is to render symbols as an interceptor, allowing for dynamic resolution
   in a running system."
   [v]
-  (if (symbol? v)
-    (interceptor/interceptor
-     {:enter (var-get (resolve v))})
-    (interceptor/interceptor v)))
+  (cond (symbol? v) (interceptor/interceptor
+                     {:enter (var-get (resolve v))})
+        (interceptor/interceptor? v) v
+        :else (interceptor/interceptor v)))
 
 (defn interceptors-for-processor [processor]
   (vec
@@ -200,7 +200,7 @@
 
   p/Lifecycle
   (start [this]
-    (reset! (:state this) :running)
+    (swap! state assoc :status :running)
     ;; start producer first, else race condition
     (if kafka-cluster
       (deliver producer
@@ -214,7 +214,7 @@
         (p/set-offset! subscribed-topic (initial-offset this)))
       (.start
        (Thread.
-        #(while (= :running @(:state this))
+        #(while (= :running (:status @state))
            (try 
              (when-let [event (p/poll subscribed-topic)]
                (process-event this event))
@@ -222,13 +222,13 @@
                (clojure.stacktrace/print-stack-trace e))))))))
   
   (stop [this]
-    (reset! (:state this) :stopped)
+    (swap! state assoc :status :stopped)
     (when kafka-cluster
       (.close @producer))))
 
 (defmethod p/init :processor [processor-def]
   (-> processor-def
-      (assoc :state (atom :stopped)
+      (assoc :state (atom {:status :stopped})
              :producer (promise))
       map->Processor))
 

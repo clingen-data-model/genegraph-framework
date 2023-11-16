@@ -31,7 +31,7 @@
 ;; TODO is cloning a query on each execution a possible
 ;; performance problem?
 (defn construct-query-with-params [query query-params]
-  (if-let [params (:genegraph.database.query/params query-params)]
+  (if-let [params (:genegraph.framework.storage.rdf/params query-params)]
     (let [modified-query (.clone query)]
       (when (:distinct params)
         (.setDistinct modified-query true))
@@ -57,7 +57,7 @@
     (with-open [qexec (QueryExecutionFactory/create query (types/model model) qs-map)]
       (cond
         (.isConstructType query) (.execConstruct qexec)
-        (.isSelectType query) (if (= :count (get-in params [:genegraph.database.query/params :type]))
+        (.isSelectType query) (if (= :count (get-in params [:genegraph.framework.storage.rdf/params :type]))
                                 (-> qexec .execSelect iterator-seq count)
                                 (compose-select-result qexec))
         (.isAskType query) (.execAsk qexec)))))

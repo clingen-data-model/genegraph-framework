@@ -1,7 +1,8 @@
 (ns genegraph.framework.storage.rdf.instance
   "Namespace for handling operations on persistent Jena datasets.
   Specifically designed around handling asychronous writes. "
-  (:require [genegraph.framework.storage :as s])
+  (:require [genegraph.framework.storage :as s]
+            [genegraph.framework.storage.rdf.types :as types])
   (:import [org.apache.jena.tdb2 TDB2Factory]
            [org.apache.jena.query Dataset ReadWrite TxnType]
            [org.apache.jena.rdf.model Model Resource ResourceFactory
@@ -89,6 +90,9 @@
     (let [o (model->offset (s/read this (topic-kw->iri topic)))]
       (.end this)
       o))
+
+  types/AsModel
+  (types/model [this] (.getUnionModel this))
 
   ;; The rest is just boilerplate to pass through calls to the Dataset
   ;; interface to the underlying Dataset object. Ideally the need for this

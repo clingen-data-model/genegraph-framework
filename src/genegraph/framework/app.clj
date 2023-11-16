@@ -62,11 +62,9 @@
    #(merge % (select-keys app [:topics :storage :kafka-clusters]))))
 
 (defn- replace-kw-ref-for-http-server [server app]
-  (println "replace-kw-ref-for-http-server " (type server))
   (assoc server
          :endpoints
          (mapv (fn [ep]
-                 (println "endpoint " ep)
                  (update ep :processor (fn [p] (get-in app [:processors p]))))
                (:endpoints server))))
 
@@ -225,6 +223,37 @@
                    ::http/type :jetty
                    ::http/port 8888
                    ::http/join? false}}})
+
+
+(defn print-event [event]
+  (clojure.pprint/pprint event)
+  event)
+
+(def app-def-3
+  {:type :genegraph-app
+   :topics {:test-topic
+            {:name :test-topic
+             :type :simple-queue-topic}}
+   :processors {:test-processor
+                {:subscribe :test-topic
+                 :name :test-processor
+                 :type :processor
+                 :interceptors `[print-event]}}})
+
+
+
+(comment
+  (def a3 (p/init app-def-3))
+
+  (p/start a3)
+  (p/stop a3)
+
+  (p/publish (get-in a3 [:topics :test-topic])
+             {::event/key "akey"
+              ::event/value "avalue"})
+
+  )
+
 (comment
 
   (def a2 (p/init app-def-2))

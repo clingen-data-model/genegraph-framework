@@ -21,10 +21,12 @@
 
 (defmethod p/init :http-server [server-def]
   (-> server-def
-      (assoc ::http/routes (route/expand-routes
-                            (set
-                             (map endpoint->route
-                                  (:endpoints server-def)))))
+      (update ::http/routes
+              #(->> (:endpoints server-def)
+                    (map endpoint->route)
+                    (concat %)
+                    set
+                    route/expand-routes))
       (assoc :state (atom {:status :stopped}))
       http/create-server
       map->Server))
