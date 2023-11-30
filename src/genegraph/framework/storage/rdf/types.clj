@@ -95,7 +95,7 @@
   
   java.lang.String
   (resource 
-    ([r] (ResourceFactory/createResource r))
+    ([r] (ResourceFactory/createResource (.expandPrefix names/prefix-mapping r)))
     ([r model] (resource (resource r) model)))
   
   clojure.lang.Keyword

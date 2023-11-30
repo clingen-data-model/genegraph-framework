@@ -81,7 +81,6 @@
    construct-case-control-evidence
    construct-proband-segregation-evidence
    construct-family-segregation-evidence
-   construct-evidence-connections
    construct-alleles
    construct-articles
    construct-earliest-articles
@@ -114,7 +113,9 @@
                         rdf/union
                         (map #(% gci-model params)
                              initial-construct-queries))
-        pruned-model (-> unlinked-model
+        linked-model (rdf/union unlinked-model
+                                (construct-evidence-connections unlinked-model))
+        pruned-model (-> linked-model
                          unlink-variant-scores-when-proband-scores-exist
                          unlink-segregations-when-no-proband-and-lod-scores)]
     (assoc event

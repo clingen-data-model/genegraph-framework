@@ -38,10 +38,11 @@
             :label {:type 'String
                     :description "The label for this resouce."
                     :resolve (fn [_ _ value]
-                               (first (concat (:skos/preferred-label value)
-                                              (:rdfs/label value)
-                                              (:foaf/name value)
-                                              (:dc/title value))))}
+                               (rdf/ld1->* value
+                                           [:skos/preferred-label
+                                            :rdfs/label
+                                            :foaf/name
+                                            :dc/title]))}
             :type {:type '(list :Resource)
                    :description "The types for this resource."
                    :args {:inferred {:type 'Boolean}}

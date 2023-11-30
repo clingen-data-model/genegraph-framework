@@ -12,14 +12,17 @@
             [genegraph.gene-validity.base :as base]
             [genegraph.gene-validity.graphql.schema :as gql-schema]
             [com.walmartlabs.lacinia.pedestal2 :as lacinia-pedestal]
+            [com.walmartlabs.lacinia.pedestal.internal :as internal]
+            [com.walmartlabs.lacinia.resolve :as resolve]
             [io.pedestal.http :as http]
             [io.pedestal.interceptor :as interceptor]
+            [io.pedestal.log :as log]
             [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.edn :as edn])
-  (:import [org.apache.jena.rdf.model Model]
+  (:import [org.apache.jena.sparql.core Transactional]
            [org.apache.jena.query ReadWrite]
-           [java.util.concurrent LinkedBlockingQueue ThreadPoolExecutor TimeUnit]))
+           [java.util.concurrent LinkedBlockingQueue ThreadPoolExecutor TimeUnit Executor Executors]))
 
 
 (def prop-query
@@ -90,22 +93,23 @@
    {:name ::jena-transaction-interceptor
     :enter (fn [context]
              (let [gv-tdb (get-in context [::storage/storage :gv-tdb])]
-               (println "transaction interceptor "
-                        (-> (Thread/currentThread) .getId))
                (.begin gv-tdb ReadWrite/READ)
                (assoc-in context [:request :lacinia-app-context :db] gv-tdb)))
     :leave (fn [context]
-             (println "transaction interceptor close "
-                        (-> (Thread/currentThread) .getId))
-             (.close (get-in context [:request :lacinia-app-context :db]))
+             (.end (get-in context [:request :lacinia-app-context :db]))
              context)}))
 
-(type (-> (Runtime/getRuntime) .availableProcessors))
+;; stuff to make sure Lacinia recieves an executor which can bookend
+;; database transactions
+
+
 
 (defn graphql-executor
-  "Construct and return an Executor for handling GraphQL queries"
+  "Construct and return an Executor for handling GraphQL queries.
+  Note that this is specifically intended only to handle read 
+  operations, writes are managed by the Jena write thread."
   [tdb]
-  (let [pool-size (.availableProcessors (Runtime/getRuntime))]
+  (let [pool-size 3 #_(* 1 (.availableProcessors (Runtime/getRuntime)))]
     (proxy [ThreadPoolExecutor]
         [pool-size
          pool-size
@@ -113,13 +117,65 @@
          TimeUnit/MILLISECONDS
          (LinkedBlockingQueue.)]
       
-      (beforeExecute [^Thread t ^Runnable r]
-        (proxy-super beforeExecute t r)
-        )
+        (beforeExecute [^Thread t ^Runnable r]
+          (proxy-super beforeExecute t r)
+          (let [db @(:instance tdb)]
+            (when (.isInTransaction db) (.end db))
+            (.begin db ReadWrite/READ)))
 
-      (afterExecute [^Runnable r ^Throwable t]
-        (proxy-super afterExecute r t)
-        ))))
+        (afterExecute [^Runnable r ^Throwable t]
+          (proxy-super afterExecute r t)
+          (let [db @(:instance tdb)]
+            (when (.isInTransaction db) (.end db)))))))
+
+(def direct-executor
+  (reify Executor
+    (^void execute [this ^Runnable r]
+     (.run r))))
+
+(defn init-graphql-processor [p]
+  (assoc-in p
+            [::event/metadata ::schema]
+            (gql-schema/schema
+             {:executor direct-executor
+              #_(graphql-executor
+               (get-in p [:storage :gv-tdb]))})))
+
+;; Adapted from version in lacinia-pedestal
+;; need to get compiled schema from context, not
+;; already passed into interceptor
+
+(def query-parser-interceptor
+  (interceptor/interceptor
+   {:name ::query-parser
+    :enter (fn [context]
+             (internal/on-enter-query-parser
+              context
+              (::schema context)
+              (::query-cache context)
+              (get-in context [:request ::timing-start])))
+    :leave internal/on-leave-query-parser
+    :error internal/on-error-query-parser}))
+
+;; (defn on-enter-query-executor
+;;   [interceptor-name]
+;;   (fn [context]
+;;     (let [resolver-result (internal/execute-query context)
+;;           *result (promise)]
+;;       (resolve/on-deliver! resolver-result
+;;                            (fn [result]
+;;                              (deliver *result result)))
+;;       (internal/apply-result-to-context context @*result interceptor-name))))
+
+
+;; (def query-executor-handler
+;;   "The handler at the end of interceptor chain, invokes Lacinia to
+;;   execute the query and return the main response.
+
+;;   This comes last in the interceptor chain."
+;;   (interceptor
+;;    {:name ::query-executor
+;;     :enter (on-enter-query-executor ::query-executor)}))
 
 (comment
 
@@ -199,7 +255,7 @@
                  :path "/users/tristan/data/genegraph-neo/gv_tdb"}}
       :processors {:gene-validity-transform
                    {:type :processor
-                    :name :gene-validity-processor
+                    :name :gene-validity-transform
                     :subscribe :gene-validity-gci
                     :interceptors `[gci-model/add-gci-model
                                     sepio-model/add-model
@@ -226,20 +282,23 @@
                    :graphql-api
                    {:name :graphql-api
                     :type :processor
-                    :interceptors [#_lacinia-pedestal/initialize-tracing-interceptor
+                    :interceptors [#_add-graphql-context-interceptor
+                                   #_lacinia-pedestal/initialize-tracing-interceptor
                                    lacinia-pedestal/json-response-interceptor
                                    lacinia-pedestal/error-response-interceptor
                                    lacinia-pedestal/body-data-interceptor
                                    lacinia-pedestal/graphql-data-interceptor
                                    lacinia-pedestal/status-conversion-interceptor
                                    lacinia-pedestal/missing-query-interceptor
-                                   (lacinia-pedestal/query-parser-interceptor
-                                    gql-schema/schema)
+                                   #_(lacinia-pedestal/query-parser-interceptor
+                                      gql-schema/schema)
+                                   query-parser-interceptor
                                    lacinia-pedestal/disallow-subscriptions-interceptor
                                    lacinia-pedestal/prepare-query-interceptor
                                    jena-transaction-interceptor
                                    #_lacinia-pedestal/enable-tracing-interceptor
-                                   lacinia-pedestal/query-executor-handler]}}
+                                   lacinia-pedestal/query-executor-handler]
+                    :init-fn init-graphql-processor}}
       :http-servers {:gene-validity-server
                      {:type :http-server
                       :name :gene-validity-server
@@ -258,8 +317,17 @@
 
   (p/start gv-test-app)
   (p/stop gv-test-app)
+
+  (def ex (graphql-executor (get-in gv-test-app [:storage :gv-tdb])))
+
+  (-> gv-test-app
+      :processors
+      :graphql-api
+      ::schema
+      :com.walmartlabs.lacinia.schema/executor)
   
   (->> (-> "base.edn" io/resource slurp edn/read-string)
+       (take 1)
        #_(filter #(isa? (:format %) ::rdf/rdf-serialization))
        #_(filter #(= "http://purl.obolibrary.org/obo/sepio.owl" (:name %)))
        (map (fn [x] {::event/data x}))
@@ -278,6 +346,11 @@
     (rdf/tx db
             (-> (rdf/resource "https://www.ncbi.nlm.nih.gov/gene/55847" db)
                 (rdf/ld-> [:skos/prefLabel]))))
+
+  (let [db @(get-in gv-test-app [:storage :gv-tdb :instance])]
+    (rdf/tx db
+            (-> (rdf/resource "mondo:0100038" db)
+                #_(rdf/ld-> [:skos/prefLabel]))))
 
   (type @(get-in gv-test-app [:storage :gv-tdb :instance]))
 
@@ -319,14 +392,24 @@ a ?t2 ;
   (event-store/with-event-reader [r gv-event-path]
     (->> (event-store/event-seq r)
          (run! #(p/publish (get-in gv-test-app [:topics :gene-validity-gci]) %))))
+
+  (def gv-xform #(processor/process-event
+                  (get-in gv-test-app [:processors :gene-validity-transform])
+                  %))
+  
+  (event-store/with-event-reader [r gv-event-path]
+    (-> (event-store/event-seq r)
+        first
+        (assoc ::event/skip-local-effects true
+               ::event/skip-publish-effects true)
+        gv-xform
+        keys))
   
   (kafka/topic->event-file
    (get-in gv-app [:topics :gene-validity-gci])
    "/users/tristan/data/genegraph-neo/all_gv_events.edn.gz")
 
-  (def gv-xform #(processor/process-event
-                  gene-validity-transform-processor
-                  %))
+
 
   (event-store/with-event-reader [r gv-event-path]
     (->> (event-store/event-seq r)
@@ -350,7 +433,26 @@ a ?t2 ;
                           ::event/skip-publish-effects true)
                    gv-xform
                    ::event/publish))))
+
+  (rdf/curie (rdf/resource "http://purl.obolibrary.org/obo/MONDO_0100038"))
+
+  (def f (future (* 10 10)))
   
+  (future? f)
+
+  (future-done? f)
+
+  (set-agent-send-off-executor!
+   (Executors/newThreadPerTaskExecutor
+    (-> (Thread/ofVirtual)
+        (.name "clojure-agent-send-pool-" 0)
+        .factory)))
+
+
+  @(future (.getName (Thread/currentThread)))
+
+  
+
   )
 
-(-> (Runtime/getRuntime) .availableProcessors)
+

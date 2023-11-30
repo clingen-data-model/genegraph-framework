@@ -129,6 +129,7 @@
   this is to render symbols as an interceptor, allowing for dynamic resolution
   in a running system."
   [v]
+  (println "->interceptor " v)
   (cond (symbol? v) (interceptor/interceptor
                      {:enter (var-get (resolve v))})
         (interceptor/interceptor? v) v
@@ -227,10 +228,9 @@
       (.close @producer))))
 
 (defmethod p/init :processor [processor-def]
-  (-> processor-def
-      (assoc :state (atom {:status :stopped})
-             :producer (promise))
-      map->Processor))
-
-
-
+  (let [init-fn (:init-fn processor-def identity)]
+    (-> processor-def
+        (assoc :state (atom {:status :stopped})
+               :producer (promise))
+        init-fn
+        map->Processor)))

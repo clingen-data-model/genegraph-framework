@@ -6,6 +6,7 @@
  "hp" "http://purl.obolibrary.org/obo/HP_"
  "sepio" "http://purl.obolibrary.org/obo/SEPIO_"
  "geno" "http://purl.obolibrary.org/obo/GENO_"
+ "mondo" "http://purl.obolibrary.org/obo/MONDO_"
  "cg" "http://dataexchange.clinicalgenome.org/terms/"
  "foaf" "http://xmlns.com/foaf/0.1/"
  "rdfs" "http://www.w3.org/2000/01/rdf-schema#"

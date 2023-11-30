@@ -67,8 +67,11 @@
    model-bibliographic-resource/bibliographic-resource])
 
 
-(defn schema []
-  (schema-builder/schema model))
+(defn schema
+  ([]
+   (schema-builder/schema model))
+  ([options]
+   (schema-builder/schema model options)))
 
 #_(defn merged-schema []
   (-> (legacy-schema/schema-for-merge)

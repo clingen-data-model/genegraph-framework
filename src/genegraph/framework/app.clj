@@ -238,7 +238,9 @@
                 {:subscribe :test-topic
                  :name :test-processor
                  :type :processor
-                 :interceptors `[print-event]}}})
+                 :interceptors `[print-event]
+                 :init-fn (fn [this]
+                            (assoc this ::event/metadata {::local-conf (:storage this)}))}}})
 
 
 

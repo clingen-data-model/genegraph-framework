@@ -21,8 +21,6 @@
 (def type-query (rdf/create-query "select ?type where {?resource a / :rdfs/subClassOf * ?type}"))
 
 (defn resolve-type [resource schema]
-  (println "resolve-type  "
-           (-> (Thread/currentThread) .getId))
   (if resource
     (let [resource-types (->> (type-query resource {:resource resource})
                               (map rdf/->kw)
@@ -133,8 +131,11 @@
 (defn schema-description [entities]
   (reduce add-entity-to-schema {} entities))
 
-(defn schema [entities]
-  (schema/compile (schema-description entities)))
+(defn schema
+  ([entities]
+   (schema/compile (schema-description entities)))
+  ([entities options]
+   (schema/compile (schema-description entities) options)))
 
 (defn print-schema [schema]
   (binding [schema/*verbose-schema-printing* true]

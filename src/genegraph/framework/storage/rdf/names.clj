@@ -1,7 +1,9 @@
 (ns genegraph.framework.storage.rdf.names
-  "A module for translating keywords to IRIs used
-  in RDF."
-  (:require [clojure.set :as s])
+  "A module for translating keywords to IRIs used in RDF.
+   CURIES will conventionally be represented as strings with an upper case
+  prefix, if a keyword representation is used, a lower case prefix is preferred. "
+  (:require [clojure.set :as s]
+            [clojure.string :as string])
   (:import [org.apache.jena.shared PrefixMapping PrefixMapping$Factory]))
 
 (def global-aliases
@@ -18,8 +20,8 @@
               (update :iri-mappings merge (s/map-invert aliases)))))
 
 (defn add-prefixes [prefixes]
-  (.setNsPrefixes prefix-mapping prefixes)
-  (swap! global-aliases update :prefixes merge prefixes))
+  (.setNsPrefixes prefix-mapping (update-keys prefixes string/upper-case))
+  (swap! global-aliases update :prefixes merge (update-keys prefixes string/lower-case)))
 
 (defn kw->iri [kw]
   (or (get (:keyword-mappings @global-aliases) kw)
@@ -57,4 +59,5 @@
  (kw->iri :dc/Title)
  (iri->kw "http://purl.org/dc/terms/Topic")
  (iri->kw "http://purl.org/dooblincork/terms/Topic")
+ 
  )

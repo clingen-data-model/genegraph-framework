@@ -89,7 +89,11 @@
   [r]  (types/->kw r))
 
 (defn curie [iri]
-  (.qnameFor names/prefix-mapping (str iri)))
+  (.shortForm names/prefix-mapping (str iri)))
+
+(.shortForm names/prefix-mapping "http://purl.obolibrary.org/obo/MONDO_0100038")
+
+(.getNsPrefixMap names/prefix-mapping)
 
 (defn ld1-> [r ks]
   (types/ld1-> r ks))
@@ -206,6 +210,13 @@
       (select-keys [::event/data])
       (assoc ::event/format ::n-triples)
       event/serialize
-      ::event/value))
+      ::event/value)
+
+  (resource :dc/BibliographicResource)
+
+  (.expandPrefix names/prefix-mapping "http://purl.org/dc/terms/Topic")
+  (.expandPrefix names/prefix-mapping "dc:Topic")
+  (.expandPrefix names/prefix-mapping "MONDO:0100038")
+  )
 
 
