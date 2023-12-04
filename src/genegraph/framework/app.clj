@@ -90,50 +90,6 @@
 ;; Stuff for testing
 ;;;;;
 
-(def app-def-1
-  {:type :genegraph-app
-   :kafka-clusters {:dx-ccloud
-                    {:type :kafka-cluster
-                     :common-config {"ssl.endpoint.identification.algorithm" "https"
-                              "sasl.mechanism" "PLAIN"
-                              "request.timeout.ms" "20000"
-                              "bootstrap.servers" "pkc-4yyd6.us-east1.gcp.confluent.cloud:9092"
-                              "retry.backoff.ms" "500"
-                              "security.protocol" "SASL_SSL"
-                              "sasl.jaas.config" (System/getenv "DX_JAAS_CONFIG")}
-                     :consumer-config {"key.deserializer"
-                                       "org.apache.kafka.common.serialization.StringDeserializer"
-                                       "value.deserializer"
-                                       "org.apache.kafka.common.serialization.StringDeserializer"}
-                     :producer-config {"key.serializer"
-                                       "org.apache.kafka.common.serialization.StringSerializer"
-                                       "value.serializer"
-                                       "org.apache.kafka.common.serialization.StringSerializer"}}
-                    :local
-                    {:common-config {"bootstrap.servers" "localhost:9092"}
-                     :producer-config {"key.serializer"
-                                       "org.apache.kafka.common.serialization.StringSerializer",
-                                       "value.serializer"
-                                       "org.apache.kafka.common.serialization.StringSerializer"}
-                     :consumer-config {"key.deserializer"
-                                       "org.apache.kafka.common.serialization.StringDeserializer"
-                                       "value.deserializer"
-                                     "org.apache.kafka.common.serialization.StringDeserializer"}}}
-   :topics {:test-topic
-            {:initial-events {:type :gcs
-                              :bucket "genegraph-framework-dev"
-                              :path "gene_validity_initial_events.edn.gz"}
-             :type :topic
-             :kafka-cluster :dx-ccloud
-             :kafka-topic "actionability"
-             :start-kafka true}}
-   :storage {:test-rocksdb
-             {:type :rocksdb
-              :path "/users/tristan/desktop/test-rocks"}}
-   :processors {:test-processor
-                {:subscribe :test-topic
-                 :type :processor
-                 :interceptors `[test-interceptor-fn]}}})
 
 (defn test-interceptor-fn [event]
   (println "test-interceptor-fn " (::event/offset event ) ":" (::event/key event))
@@ -170,7 +126,7 @@
              :kafka-consumer-group "testcg9"
              :kafka-cluster :local
              :kafka-topic "test"}
-            :test-reader
+            #_#_:test-reader
             {:name :test-reader
              :type :kafka-reader-topic
              :kafka-cluster :local
@@ -199,9 +155,9 @@
               :name :test-jena
               :path "/users/tristan/desktop/test-jena"}}
    :processors {:test-processor
-                {:subscribe :test-reader
+                {:subscribe :test-topic
                  :name :test-processor
-                 :type :processor
+                 :type :parallel-processor
                  :kafka-cluster :local
                  :backing-store :test-jena
                  :interceptors `[test-interceptor-fn]}
@@ -259,17 +215,7 @@
 (comment
 
   (def a2 (p/init app-def-2))
-  a2
   (p/start a2)
-  (-> a2
-      :topics
-      :test-reader
-      :state
-      deref)
-  (-> a2
-      :topics
-      :test-topic
-      kafka/kafka-position)
   (p/publish (get-in a2 [:topics :publish-to-test])
              {:payload
               {::event/key "k18"
@@ -282,6 +228,5 @@
   (processor/starting-offset (get-in a2 [:processors :test-processor]))
   (get-in a2 [:processors :test-processor :storage :test-rocksdb :instance])
   (p/stop a2)
-
   )
 

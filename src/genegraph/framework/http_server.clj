@@ -6,6 +6,8 @@
 
 (defrecord Server [type
                    name
+                   producer
+                   kafka-cluster
                    state]
   p/Lifecycle
   (start [this]
@@ -17,7 +19,7 @@
 
 (defn endpoint->route [{:keys [path processor method] :or {method :get}}]
   (let [http-method (or method :get)]
-    [path http-method (p/interceptors processor) :route-name (:name processor)]))
+    [path http-method #(p/process processor %) :route-name (:name processor)]))
 
 (defmethod p/init :http-server [server-def]
   (-> server-def
@@ -27,7 +29,8 @@
                     (concat %)
                     set
                     route/expand-routes))
-      (assoc :state (atom {:status :stopped}))
+      (assoc :state (atom {:status :stopped})
+             :producer (promise))
       http/create-server
       map->Server))
 
@@ -45,37 +48,20 @@
       :interceptors `[test-response-fn]}))
   (p/start p)
   (p/process p {})
-  (p/interceptors p)
   (p/stop p)
 
-  (route/expand-routes
-   #{(endpoint->route {:path "/huh"
-                       :processor p})})
-  
   (def s
     (p/init
      {:type :http-server
       :name :test-server
-      :endpoints [["/hello" p]]
+      :endpoints [{:path "/hello"
+                   :processor p}]
       ::http/type :jetty
       ::http/port 8888
       ::http/join? false}))
-  s
+
   (p/start s)
   (p/stop s)
-
-  (route/expand-routes
-   #{["/hello"
-      :get (fn [e] (p/process p e))
-      :route-name ::hello]})
-
-  
-  (route/expand-routes
-   {::http/route [{:path "/hello"
-                   :method :get
-                   :interceptors []
-                   :route-name :genegraph.framework.http-server/hello}]})
-  
   )
 
 

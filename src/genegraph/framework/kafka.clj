@@ -19,15 +19,17 @@
                 opts))
     .initTransactions))
 
+
 (defn commit-offset [event]
-  (try
-    (.sendOffsetsToTransaction
-     (::event/producer event)
-     {(TopicPartition. (::event/kafka-topic event) 0)
-      (OffsetAndMetadata. (+ 1 (::event/offset event)))} ; use next offset, per kafka docs
-     (ConsumerGroupMetadata. (::event/consumer-group event)))
-    event
-    (catch Exception e (assoc event ::event/error true))))
+  (.sendOffsetsToTransaction
+   (::event/producer event)
+   {(TopicPartition. (::event/kafka-topic event) 0)
+    (OffsetAndMetadata. (+ 1 (::event/offset event)))} ; use next offset, per kafka docs
+   (ConsumerGroupMetadata. (::event/consumer-group event)))
+  event)
+
+(defn commit-transaction [event]
+  (.commitTransaction (::event/producer event)))
 
 (defn event->producer-record
   [{topic ::event/kafka-topic
@@ -105,6 +107,8 @@
         local-offset (deref (:initial-local-offset state) 100 :timeout)
         cg-offset (deref (:initial-consumer-group-offset state) 100 :timeout)]
     (println "backing-store-lags-consumer-group? "
+             (:name topic)
+             " "
              local-offset
              " "
              cg-offset)
@@ -353,7 +357,9 @@
   (publish [this event] (publish this event))
   
   p/Offsets
-  (set-offset! [this offset] (deliver (:initial-local-offset @state) offset)))
+  (set-offset! [this offset]
+    (println "set offset " offset)
+    (deliver (:initial-local-offset @state) offset)))
 
 (defmethod p/init :kafka-reader-topic  [topic-definition]
   (let [topic-def-with-defaults (merge topic-defaults

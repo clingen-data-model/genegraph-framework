@@ -22,8 +22,10 @@
 
 (defprotocol EventProcessor
   "Protocol for processor objects"
-  (process [this event] "Process event, including side effects")
-  (interceptors [this] "Vector of interceptors for this processor"))
+  (process [this event] "Process event, including side effects"))
+
+(defn running? [this]
+  (= :running (-> this :state deref :status)))
 
 (defn exception
   "Registers exception e occurred in entity this"

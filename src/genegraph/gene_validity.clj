@@ -445,7 +445,7 @@ a ?t2 ;
   (set-agent-send-off-executor!
    (Executors/newThreadPerTaskExecutor
     (-> (Thread/ofVirtual)
-        (.name "clojure-agent-send-pool-" 0)
+        (.name "clojure-agent-send-" 0)
         .factory)))
 
 
