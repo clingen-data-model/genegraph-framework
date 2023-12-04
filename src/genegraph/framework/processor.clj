@@ -65,12 +65,9 @@
     :leave #(perform-local-effects! %)}))
 
 (defn add-processor-defined-metadata [event processor]
-  (println "add-processor-defined-metadata "(keys (::event/metadata processor)))
   (merge event (::event/metadata processor)))
 
 (defn add-storage-refs [event processor]
-  (println "add-storage-refs")
-  (clojure.pprint/pprint processor)
   (assoc event
          ::s/storage
          (update-vals (:storage processor)
@@ -109,7 +106,6 @@
 (defn backing-store-instance
   "Return instance of backing store for PROCESSOR"
   [processor]
-  (println "in backing-store-instance")
   (if-let [backing-store (:backing-store processor)]
     @(get-in processor [:storage backing-store :instance])))
 
@@ -127,12 +123,7 @@
         (interceptor/interceptor? v) v
         :else (interceptor/interceptor v)))
 
-(defn trace [e]
-  (println "trace " (keys e))
-  e)
-
 (defn process-event [processor event]
-  (println "process event " (:name processor))
   (-> event
       (add-app-state processor)
       event/deserialize
@@ -146,15 +137,12 @@
   Note that initial offset will be one slot past the offset for
   the last read record."
   [processor]
-  (println "in initial-offset")
   (if-let [backing-store (backing-store-instance processor)]
-    (do 
-      (println "found backing store")
-      (let [o (s/retrieve-offset backing-store (:subscribe processor))]
-        (case o
-          nil 0
-          ::s/miss 0
-          (+ 1 o))))
+    (let [o (s/retrieve-offset backing-store (:subscribe processor))]
+      (case o
+        nil 0
+        ::s/miss 0
+        (+ 1 o)))
     nil))
 
 
@@ -266,7 +254,6 @@
 
   p/Lifecycle
   (start [this]
-    (println "starting " name)
     (swap! state assoc :status :running)
     ;; start producer first, else race condition
     (init-kafka-producer! this)
