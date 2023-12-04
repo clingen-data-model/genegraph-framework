@@ -102,32 +102,6 @@
 ;; stuff to make sure Lacinia recieves an executor which can bookend
 ;; database transactions
 
-
-
-(defn graphql-executor
-  "Construct and return an Executor for handling GraphQL queries.
-  Note that this is specifically intended only to handle read 
-  operations, writes are managed by the Jena write thread."
-  [tdb]
-  (let [pool-size 3 #_(* 1 (.availableProcessors (Runtime/getRuntime)))]
-    (proxy [ThreadPoolExecutor]
-        [pool-size
-         pool-size
-         Long/MAX_VALUE
-         TimeUnit/MILLISECONDS
-         (LinkedBlockingQueue.)]
-      
-        (beforeExecute [^Thread t ^Runnable r]
-          (proxy-super beforeExecute t r)
-          (let [db @(:instance tdb)]
-            (when (.isInTransaction db) (.end db))
-            (.begin db ReadWrite/READ)))
-
-        (afterExecute [^Runnable r ^Throwable t]
-          (proxy-super afterExecute r t)
-          (let [db @(:instance tdb)]
-            (when (.isInTransaction db) (.end db)))))))
-
 (def direct-executor
   (reify Executor
     (^void execute [this ^Runnable r]
@@ -137,9 +111,7 @@
   (assoc-in p
             [::event/metadata ::schema]
             (gql-schema/schema
-             {:executor direct-executor
-              #_(graphql-executor
-               (get-in p [:storage :gv-tdb]))})))
+             {:executor direct-executor})))
 
 ;; Adapted from version in lacinia-pedestal
 ;; need to get compiled schema from context, not
@@ -176,6 +148,18 @@
 ;;   (interceptor
 ;;    {:name ::query-executor
 ;;     :enter (on-enter-query-executor ::query-executor)}))
+
+(def gcs-handle
+  {:type :gcs
+   :bucket "genegraph-framework-dev"})
+
+(def fs-handle
+  {:type :file
+   :base "/users/tristan/data/genegraph-neo/"})
+
+(def base-fs-handle
+  {:type :file
+   :base "/users/tristan/data/genegraph-neo/new-base/"})
 
 (comment
 
@@ -222,17 +206,22 @@
             (assoc event ::event/format ::rdf/n-triples))))
     event)
 
-  (def gcs-handle
-    {:type :gcs
-     :bucket "genegraph-framework-dev"})
-  
-  (def fs-handle
-    {:type :file
-     :base "/users/tristan/data/genegraph-neo/"})
 
-  (def base-fs-handle
-    {:type :file
-     :base "/users/tristan/data/genegraph-neo/new-base/"})
+
+  (def print-response-interceptor
+    {:name ::print-response
+     :leave (fn [e]
+              (clojure.pprint/pprint e)
+              e)})
+
+  (defn print-marker-interceptor [marker]
+    {:name ::print-marker
+     :enter (fn [e]
+              (println "enter " marker)
+              e)
+     :leave (fn [e]
+              (println "leave " marker)
+              e)})
 
   (def gv-test-app
     (p/init
@@ -284,6 +273,7 @@
                     :type :processor
                     :interceptors [#_add-graphql-context-interceptor
                                    #_lacinia-pedestal/initialize-tracing-interceptor
+                                   jena-transaction-interceptor
                                    lacinia-pedestal/json-response-interceptor
                                    lacinia-pedestal/error-response-interceptor
                                    lacinia-pedestal/body-data-interceptor
@@ -295,7 +285,6 @@
                                    query-parser-interceptor
                                    lacinia-pedestal/disallow-subscriptions-interceptor
                                    lacinia-pedestal/prepare-query-interceptor
-                                   jena-transaction-interceptor
                                    #_lacinia-pedestal/enable-tracing-interceptor
                                    lacinia-pedestal/query-executor-handler]
                     :init-fn init-graphql-processor}}
@@ -318,13 +307,13 @@
   (p/start gv-test-app)
   (p/stop gv-test-app)
 
+  (p/as-interceptors (get-in gv-test-app [:processors :graphql-api]))
+
   (def ex (graphql-executor (get-in gv-test-app [:storage :gv-tdb])))
 
   (-> gv-test-app
-      :processors
-      :graphql-api
-      ::schema
-      :com.walmartlabs.lacinia.schema/executor)
+      :http-servers
+      :gene-validity-server)
   
   (->> (-> "base.edn" io/resource slurp edn/read-string)
        (take 1)
@@ -438,7 +427,7 @@ a ?t2 ;
 
   (def f (future (* 10 10)))
   
-  (future? f)
+  p  (future? f)
 
   (future-done? f)
 
@@ -448,10 +437,7 @@ a ?t2 ;
         (.name "clojure-agent-send-" 0)
         .factory)))
 
-
-  @(future (.getName (Thread/currentThread)))
-
-  
+  (gql-schema/schema)
 
   )
 

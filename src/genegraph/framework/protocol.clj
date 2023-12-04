@@ -24,6 +24,11 @@
   "Protocol for processor objects"
   (process [this event] "Process event, including side effects"))
 
+(defprotocol StatefulInterceptors
+  "Protocol for processors that are capable of representing their
+  operation as a sequence of interceptors."
+  (as-interceptors [this] "Return a sequence of interceptors to perform the event handling for an event"))
+
 (defn running? [this]
   (= :running (-> this :state deref :status)))
 

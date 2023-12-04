@@ -19,7 +19,7 @@
 
 (defn endpoint->route [{:keys [path processor method] :or {method :get}}]
   (let [http-method (or method :get)]
-    [path http-method #(p/process processor %) :route-name (:name processor)]))
+    [path http-method (p/as-interceptors processor) :route-name (:name processor)]))
 
 (defmethod p/init :http-server [server-def]
   (-> server-def

@@ -31,7 +31,6 @@
   event)
 
 (defn perform-publish-effects! [event]
-  (println "peform publish effects ")
   (-> event
       open-kafka-transaction!
       publish-events!
@@ -39,8 +38,9 @@
       commit-kafka-transaction!))
 
 (def publish-effects-interceptor
-  {:name ::publish-effects-interceptor
-   :leave #(perform-publish-effects! %)})
+  (interceptor/interceptor
+   {:name ::publish-effects-interceptor
+    :leave #(perform-publish-effects! %)}))
 
 (defn update-local-storage! [{::event/keys [skip-local-effects effects] :as event}]
   (when-not skip-local-effects
@@ -60,13 +60,17 @@
       commit-local-offset!))
 
 (def local-effects-interceptor
-  {:name ::local-effects-interceptor
-   :leave #(perform-local-effects! %)})
+  (interceptor/interceptor
+   {:name ::local-effects-interceptor
+    :leave #(perform-local-effects! %)}))
 
 (defn add-processor-defined-metadata [event processor]
+  (println "add-processor-defined-metadata "(keys (::event/metadata processor)))
   (merge event (::event/metadata processor)))
 
 (defn add-storage-refs [event processor]
+  (println "add-storage-refs")
+  (clojure.pprint/pprint processor)
   (assoc event
          ::s/storage
          (update-vals (:storage processor)
@@ -82,21 +86,25 @@
                      :instance]))
     event))
 
-(defn add-processor-state [event processor]
-  (-> (select-keys processor [:producer :topics])
-      (update-keys #(keyword "genegraph.framework.event" (name %)))
-      (update ::event/producer deref)
-      (merge event)))
+(defn add-producer [event processor]
+  (if-let [producer (:producer processor)]
+    (assoc event ::event/producer (deref producer))
+    event))
+
+(defn add-topics [event processor]
+  (assoc event ::event/topics (:topics processor)))
 
 (defn add-app-state [event processor]
   (-> (add-processor-defined-metadata event processor)
       (add-storage-refs processor)
       (add-backing-store processor)
-      (add-processor-state processor)))
+      (add-producer processor)
+      (add-topics processor)))
 
 (defn app-state-interceptor [processor]
-  {:name ::app-state-interceptor
-   :enter #(add-app-state % processor)})
+  (interceptor/interceptor
+   {:name ::app-state-interceptor
+    :enter #(add-app-state % processor)}))
 
 (defn backing-store-instance
   "Return instance of backing store for PROCESSOR"
@@ -118,6 +126,10 @@
                      {:enter (var-get (resolve v))})
         (interceptor/interceptor? v) v
         :else (interceptor/interceptor v)))
+
+(defn trace [e]
+  (println "trace " (keys e))
+  e)
 
 (defn process-event [processor event]
   (println "process event " (:name processor))
@@ -192,6 +204,14 @@
 
   p/EventProcessor
   (process [this event] (process-event this event))
+
+  p/StatefulInterceptors
+  (as-interceptors [this]
+    (into []
+          (concat [(app-state-interceptor this)
+                   local-effects-interceptor
+                   publish-effects-interceptor]
+                  (map ->interceptor interceptors))))
 
   p/Lifecycle
   (start [this]
