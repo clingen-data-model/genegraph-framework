@@ -41,7 +41,7 @@
   (assoc event
          ::event/iri
          (-> (prop-query
-              (::event/model event)
+              (:gene-validity/model event)
               {:type :sepio/GeneValidityProposition})
              first
              str)))
@@ -50,7 +50,7 @@
   (event/publish event
                  (-> event
                      (set/rename-keys {::event/iri ::event/key
-                                       ::event/model ::event/data})
+                                       :gene-validity/model ::event/data})
                      (select-keys [::event/key ::event/data])
                      (assoc ::event/topic :gene-validity-sepio))))
 
@@ -128,26 +128,6 @@
               (get-in context [:request ::timing-start])))
     :leave internal/on-leave-query-parser
     :error internal/on-error-query-parser}))
-
-;; (defn on-enter-query-executor
-;;   [interceptor-name]
-;;   (fn [context]
-;;     (let [resolver-result (internal/execute-query context)
-;;           *result (promise)]
-;;       (resolve/on-deliver! resolver-result
-;;                            (fn [result]
-;;                              (deliver *result result)))
-;;       (internal/apply-result-to-context context @*result interceptor-name))))
-
-
-;; (def query-executor-handler
-;;   "The handler at the end of interceptor chain, invokes Lacinia to
-;;   execute the query and return the main response.
-
-;;   This comes last in the interceptor chain."
-;;   (interceptor
-;;    {:name ::query-executor
-;;     :enter (on-enter-query-executor ::query-executor)}))
 
 (def gcs-handle
   {:type :gcs
@@ -243,7 +223,7 @@
                  :name :gv-tdb
                  :path "/users/tristan/data/genegraph-neo/gv_tdb"}}
       :processors {:gene-validity-transform
-                   {:type :processor
+                   {:type :parallel-processor
                     :name :gene-validity-transform
                     :subscribe :gene-validity-gci
                     :interceptors `[gci-model/add-gci-model
@@ -307,13 +287,6 @@
   (p/start gv-test-app)
   (p/stop gv-test-app)
 
-  (p/as-interceptors (get-in gv-test-app [:processors :graphql-api]))
-
-  (def ex (graphql-executor (get-in gv-test-app [:storage :gv-tdb])))
-
-  (-> gv-test-app
-      :http-servers
-      :gene-validity-server)
   
   (->> (-> "base.edn" io/resource slurp edn/read-string)
        (take 1)
@@ -328,8 +301,6 @@
             (-> ((rdf/create-query "select ?x where { ?x a :so/Gene } limit 5")
                  (rdf/resource "https://www.ncbi.nlm.nih.gov/gene/55847" db))
                 first)))
-
-
 
   (let [db @(get-in gv-test-app [:storage :gv-tdb :instance])]
     (rdf/tx db
@@ -377,22 +348,28 @@ a ?t2 ;
                         [:sepio/has-evidence :<]]))))
   
 
-  
-  (event-store/with-event-reader [r gv-event-path]
-    (->> (event-store/event-seq r)
-         (run! #(p/publish (get-in gv-test-app [:topics :gene-validity-gci]) %))))
+
+  ;; Load all gene validity stuff into Genegraph (takes ~20m with parallel execution
+  (time
+   (event-store/with-event-reader [r gv-event-path]
+     (->> (event-store/event-seq r)
+          (run! #(p/publish (get-in gv-test-app [:topics :gene-validity-gci]) %)))))
 
   (def gv-xform #(processor/process-event
                   (get-in gv-test-app [:processors :gene-validity-transform])
                   %))
-  
+
   (event-store/with-event-reader [r gv-event-path]
-    (-> (event-store/event-seq r)
-        first
-        (assoc ::event/skip-local-effects true
-               ::event/skip-publish-effects true)
-        gv-xform
-        keys))
+    (frequencies
+     (map
+      #(-> (rdf/ld1-> % [:rdf/type]) rdf/->kw)
+      ((rdf/create-query "select ?x where { ?x :sepio/has-evidence ?y }")
+       (-> (event-store/event-seq r)
+           first
+           (assoc ::event/skip-local-effects true
+                  ::event/skip-publish-effects true)
+           gv-xform
+           :gene-validity/model)))))
   
   (kafka/topic->event-file
    (get-in gv-app [:topics :gene-validity-gci])
@@ -427,7 +404,7 @@ a ?t2 ;
 
   (def f (future (* 10 10)))
   
-  p  (future? f)
+  (future? f)
 
   (future-done? f)
 
@@ -439,6 +416,17 @@ a ?t2 ;
 
   (gql-schema/schema)
 
-  )
+  ;; zeb 2 example
+  (def zeb2
+    (event-store/with-event-reader [r gv-event-path]
+      (->> (event-store/event-seq r)
+           (filter #(re-find #"c16423b1" (::event/value %)))
+           last)))
+  
+  (-> ((rdf/create-query "select ?el where { ?el a ?type }")
+       (-> zeb2 gv-xform :gene-validity/model)
+       {:type :sepio/OverallAutosomalDominantDeNovoVariantEvidenceLine})
+      first
+      (rdf/ld-> [:sepio/has-evidence])))
 
 

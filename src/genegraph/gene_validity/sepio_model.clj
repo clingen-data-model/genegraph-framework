@@ -106,18 +106,23 @@
          (or (some-> event ::event/timestamp Instant/ofEpochMilli str)
              "2020-05-01")))
 
-(defn add-model [event]
-  (let [gci-model (rdf/union (:gene-validity/gci-model event) gdm-sepio-relationships)
-        params (params-for-construct event)
+(defn gci-data->sepio-model [gci-data params]
+  (let [gci-model (rdf/union gci-data gdm-sepio-relationships)
         unlinked-model (apply
                         rdf/union
                         (map #(% gci-model params)
                              initial-construct-queries))
         linked-model (rdf/union unlinked-model
-                                (construct-evidence-connections unlinked-model))
-        pruned-model (-> linked-model
-                         unlink-variant-scores-when-proband-scores-exist
-                         unlink-segregations-when-no-proband-and-lod-scores)]
-    (assoc event
-           ::event/model
-           pruned-model)))
+                                (construct-evidence-connections
+                                 (rdf/union
+                                  unlinked-model
+                                  gdm-sepio-relationships)))]
+    (-> linked-model
+        unlink-variant-scores-when-proband-scores-exist
+        unlink-segregations-when-no-proband-and-lod-scores)))
+
+(defn add-model [event]
+  (assoc event
+         :gene-validity/model
+         (gci-data->sepio-model (:gene-validity/gci-model event)
+                                (params-for-construct event))))

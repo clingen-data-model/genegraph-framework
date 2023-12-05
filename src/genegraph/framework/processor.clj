@@ -284,5 +284,5 @@
 (defmethod p/init :parallel-processor [processor-def]
   (-> processor-def
       processor-init
-      (assoc :effect-queue (ArrayBlockingQueue. 50))
+      (assoc :effect-queue (ArrayBlockingQueue. 100))
       map->ParallelProcessor))
