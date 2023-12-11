@@ -8,6 +8,7 @@
             [genegraph.framework.storage.rocksdb]
             [genegraph.framework.storage.rdf]
             [genegraph.framework.storage.gcs]
+            [genegraph.framework.storage.atom]
             [genegraph.framework.kafka :as kafka]
             [genegraph.framework.topic :as topic]
             [genegraph.framework.event :as event]

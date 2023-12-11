@@ -39,6 +39,9 @@
 
 (defrecord RDFStore [instance state queue-size text-assembly-path path name]
 
+  s/HasInstance
+  (instance [_] @instance)
+
   s/Snapshot
   (store-snapshot [this storage-handle]
     (with-open [os (-> storage-handle

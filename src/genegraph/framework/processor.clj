@@ -70,18 +70,16 @@
 (defn add-storage-refs [event processor]
   (assoc event
          ::s/storage
-         (update-vals (:storage processor)
-                      (fn [s] @(:instance s)))))
+         (update-vals (:storage processor) s/instance)))
+
+(defn backing-store-instance
+  "Return instance of backing store for PROCESSOR"
+  [processor]
+  (if-let [backing-store (:backing-store processor)]
+    (s/instance (get-in processor [:storage backing-store]))))
 
 (defn add-backing-store [event processor]
-  (if (:backing-store processor)
-    (assoc event
-           ::event/backing-store
-           @(get-in processor
-                    [:storage
-                     (:backing-store processor)
-                     :instance]))
-    event))
+  (assoc event ::event/backing-store (backing-store-instance processor)))
 
 (defn add-producer [event processor]
   (if-let [producer (:producer processor)]
@@ -102,12 +100,6 @@
   (interceptor/interceptor
    {:name ::app-state-interceptor
     :enter #(add-app-state % processor)}))
-
-(defn backing-store-instance
-  "Return instance of backing store for PROCESSOR"
-  [processor]
-  (if-let [backing-store (:backing-store processor)]
-    @(get-in processor [:storage backing-store :instance])))
 
 (defn get-subscribed-topic
   [processor]

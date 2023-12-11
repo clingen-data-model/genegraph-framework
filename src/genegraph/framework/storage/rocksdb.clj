@@ -22,6 +22,10 @@
                             path
                             state
                             instance]
+
+  storage/HasInstance
+  (storage/instance [_] @instance)
+  
   p/Lifecycle
   (start [this]
     (io/make-parents path)
