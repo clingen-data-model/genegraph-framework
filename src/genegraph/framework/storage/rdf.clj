@@ -13,11 +13,12 @@
   (:import [java.io ByteArrayOutputStream ByteArrayInputStream]
            [org.apache.jena.rdf.model Model Resource ModelFactory
             ResourceFactory Statement Property]
-           [org.apache.jena.tdb2 TDB2Factory]
+           [org.apache.jena.tdb2 TDB2Factory DatabaseMgr]
            [org.apache.jena.query ReadWrite Query QueryFactory QueryExecutionFactory Dataset
             QuerySolutionMap]
            [org.apache.jena.sparql.algebra OpAsQuery]
-           [org.apache.jena.riot RDFDataMgr Lang]))
+           [org.apache.jena.riot RDFDataMgr Lang]
+           [java.util.zip GZIPInputStream]))
 
 (def instance-defaults
   {:queue-size 100})
@@ -26,7 +27,43 @@
   "transform input into rdf model"
   :format)
 
-(defrecord RDFStore [instance state queue-size text-assembly-path path]
+(defmacro tx 
+  "Open a read transaction on the persistent database. Most commands that read data from the databse will call this internally, since Jena TDB explicitly requires opening a transaction to read any data. If one wishes to issue multiple read commands within the scope of a single transaction, it is perfectly acceptable to wrap them all in a tx call, as this uses the var *in-tx* to ensure only a single transaction per thread is opened."
+  [db & body]
+  `(if (.isInTransaction ~db) 
+     (do ~@body)
+     (try
+       (.begin ~db ReadWrite/READ)
+       (do ~@body)
+       (finally (.end ~db)))))
+
+(defrecord RDFStore [instance state queue-size text-assembly-path path name]
+
+  s/Snapshot
+  (store-snapshot [this storage-handle]
+    (with-open [os (-> storage-handle
+                 (assoc :path (clojure.core/name name))
+                 s/as-handle
+                 io/output-stream)]
+         (-> @instance
+             .asDatasetGraph
+             DatabaseMgr/backup
+             io/file
+             (io/copy os))))
+  
+  (restore-snapshot [this storage-handle]
+    (with-open [is (-> storage-handle
+                 (assoc :path (clojure.core/name name))
+                 s/as-handle
+                 io/input-stream
+                 GZIPInputStream.)]
+      (let [db @instance]
+        (try
+          (.begin db ReadWrite/WRITE)
+          (RDFDataMgr/read db is Lang/NQUADS)
+          (.commit db)
+          (finally (.end db))))))
+
   p/Lifecycle
   (start [this]
     (reset! instance (i/start-dataset (dissoc this :instance))))
@@ -41,16 +78,6 @@
     storage-def
     {:instance (atom nil)
      :state (atom :stopped)})))
-
-(defmacro tx 
-  "Open a read transaction on the persistent database. Most commands that read data from the databse will call this internally, since Jena TDB explicitly requires opening a transaction to read any data. If one wishes to issue multiple read commands within the scope of a single transaction, it is perfectly acceptable to wrap them all in a tx call, as this uses the var *in-tx* to ensure only a single transaction per thread is opened."
-  [db & body]
-  `(if (.isInTransaction ~db) 
-     (do ~@body)
-     (try
-       (.begin ~db ReadWrite/READ)
-       (do ~@body)
-       (finally (.end ~db)))))
 
 (def jena-rdf-format
   {:rdf-xml "RDF/XML"

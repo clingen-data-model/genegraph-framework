@@ -12,6 +12,8 @@
             [genegraph.framework.topic :as topic]
             [genegraph.framework.event :as event]
             [io.pedestal.http :as http]
+            [io.pedestal.interceptor :as interceptor]
+            [io.pedestal.log :as log]
             [clojure.spec.alpha :as spec]))
 
 (spec/def ::app
@@ -34,6 +36,12 @@
                   (vals storage)
                   (vals topics)))
     this))
+
+
+(defn create-system-topic []
+  (p/init
+   {:type :simple-queue-topic
+    :name :system}))
 
 (defn- init-components [def components]
   (reduce
@@ -75,16 +83,56 @@
    update-vals
    #(replace-kw-ref-for-http-server % app)))
 
+(defn add-system-topic-ref-to-components [app system-topic components]
+  (reduce
+   (fn [a c] (update a c
+                     (fn [c1]
+                       (update-vals c1 #(assoc % :system-topic system-topic)))))
+   app
+   components))
+
+(def log-system-event-interceptor
+  (interceptor/interceptor
+   {:name ::log-system-event-interceptor
+    :enter (fn [e] (p/log-event e))}))
+
+(defn create-default-system-processor []
+  {:subscribe :system
+   :name :default-system-processor
+   :type :processor
+   :interceptors [log-system-event-interceptor]})
+
+(defn has-custom-system-processor? [app]
+  (some #(= :system (:subscribe %)) (:processors app)))
+
+(defn add-default-system-processor [app]
+  (if (has-custom-system-processor? app)
+    app
+    (assoc-in app
+              [:processors :default-system-processor]
+              (create-default-system-processor))))
+
 (defmethod p/init :genegraph-app [app]
-  (-> app
-      (add-kafka-cluster-refs :topics)
-      (add-kafka-cluster-refs :processors)
-      (init-components [:topics :storage])
-      (add-topic-and-storage-refs :processors)
-      (init-components [:processors])
-      add-processor-refs-to-endpoints
-      (init-components [:http-servers])
-      map->App))
+  (let [system-topic (create-system-topic)]
+    (-> app
+        add-default-system-processor
+        (add-kafka-cluster-refs :topics)
+        (add-kafka-cluster-refs :processors)
+        (add-system-topic-ref-to-components
+         system-topic
+         [:topics :storage :processors :http-servers])
+        (init-components [:topics :storage])
+        (assoc-in [:topics :system] system-topic)
+        (add-topic-and-storage-refs :processors)
+        (init-components [:processors])
+        add-processor-refs-to-endpoints
+        (init-components [:http-servers])
+        map->App)))
+
+
+(defmethod p/log-event :default [e]
+  (log/info :source (:source e)
+            :type (:type e)))
 
 ;;;;;
 ;; Stuff for testing
@@ -95,9 +143,9 @@
   (println "test-interceptor-fn " (::event/offset event ) ":" (::event/key event))
   event
   #_(-> event
-      (event/publish {::event/key (str "new-" (::event/key event))
-                      ::event/data {:hgvs "NC_00000001:50000A>C"}
-                      ::event/topic :test-endpoint})))
+        (event/publish {::event/key (str "new-" (::event/key event))
+                        ::event/data {:hgvs "NC_00000001:50000A>C"}
+                        ::event/topic :test-endpoint})))
 
 (defn test-publisher-fn [event]
   (event/publish event (:payload event)))
@@ -199,6 +247,13 @@
                             (assoc this ::event/metadata {::local-conf (:storage this)}))}}})
 
 
+(def gcs-handle
+  {:type :gcs
+   :bucket "genegraph-framework-dev"})
+
+(def fs-handle
+  {:type :file
+   :base "/users/tristan/data/genegraph-neo/"})
 
 (comment
   (def a3 (p/init app-def-3))
@@ -216,6 +271,7 @@
 
   (def a2 (p/init app-def-2))
   (p/start a2)
+  (-> a2 :topics )
   (p/publish (get-in a2 [:topics :publish-to-test])
              {:payload
               {::event/key "k18"
@@ -223,6 +279,23 @@
                ::event/topic :test-topic}
               #_#_#_#_::event/skip-local-effects true
               ::event/skip-publish-effects true})
+
+  (p/publish (get-in a2 [:processors :test-processor :system-topic])
+             {:key :k :type :system-event})
+
+  (p/publish-system-update (get-in a2 [:processors :test-processor])
+                           {:key :k :type :system-event})
+
+  (-> a2 :processors :test-processor :system-topic)
+  (-> a2 :topics :system)
+  
+  (time
+   (s/store-snapshot (get-in a2 [:storage :test-jena])
+                     gcs-handle))
+  (time
+   (s/restore-snapshot (get-in a2 [:storage :test-jena])
+                       gcs-handle))
+
   (s/store-offset @(get-in a2 [:storage :test-rocksdb :instance]) :test-topic 1)
   (s/retrieve-offset @(get-in a2 [:storage :test-rocksdb :instance]) :test-topic)
   (processor/starting-offset (get-in a2 [:processors :test-processor]))

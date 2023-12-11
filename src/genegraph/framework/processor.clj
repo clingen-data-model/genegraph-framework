@@ -170,7 +170,6 @@
                :interceptors (map ->interceptor (:interceptors processor-def)))
         init-fn)))
 
-
 ;; name -- name of processor
 ;; subscribe -- topic to source events from
 ;; storage -- storage entities to pass forward to event handling
@@ -215,7 +214,8 @@
              (when-let [event (p/poll subscribed-topic)]
                (process-event this event))
              (catch Exception e
-               (clojure.stacktrace/print-stack-trace e))))))))
+               (clojure.stacktrace/print-stack-trace e)))))))
+    (p/publish-system-update this {:source name :type :start}))
   
   (stop [this]
     (swap! state assoc :status :stopped)

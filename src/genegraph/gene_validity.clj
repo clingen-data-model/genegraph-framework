@@ -287,6 +287,15 @@
   (p/start gv-test-app)
   (p/stop gv-test-app)
 
+
+  (time
+   (storage/store-snapshot (get-in gv-test-app [:storage :gv-tdb]) gcs-handle))
+
+  (time
+   (storage/restore-snapshot (get-in gv-test-app [:storage :gv-tdb]) gcs-handle))
+
+
+
   
   (->> (-> "base.edn" io/resource slurp edn/read-string)
        (take 1)

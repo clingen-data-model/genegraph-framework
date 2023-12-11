@@ -4,6 +4,8 @@
 
 (defmulti init :type)
 
+(defmulti log-event :type)
+
 (defprotocol Lifecycle
   (start [this])
   (stop [this]))
@@ -29,14 +31,31 @@
   operation as a sequence of interceptors."
   (as-interceptors [this] "Return a sequence of interceptors to perform the event handling for an event"))
 
-(defn running? [this]
+(defn running?
+  "True if component is running. Depends on component having a :state atom with a
+  :status field reporting its current state."
+  [this]
   (= :running (-> this :state deref :status)))
+
+(defn publish-system-update
+  "Called when a component reaches a lifecycle milestone (exceptional or unexceptional).
+  Reports the event to the system topic associated with the component."
+  [this event]
+  (publish (:system-topic this) event))
 
 (defn exception
   "Registers exception e occurred in entity this"
   [this e]
-  (println "exception " (type e) " in " (:name this) )
   (swap! (:state this)
          assoc
          :status :exception
-         :exception e))
+         :exception e)
+  (if (:system-topic this)
+    (publish-system-update
+     {:source this
+      :type :exception
+      :exception e})
+    (do
+      (println "Exception in entity without system topic reference "
+               (:name this))
+      (clojure.stacktrace/print-stack-trace e))))

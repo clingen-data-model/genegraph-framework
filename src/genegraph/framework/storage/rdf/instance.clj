@@ -47,7 +47,6 @@
                               queue-size
                               name]
 
-  
   ;; Setting the behavior of close to cleanly terminate all related
   ;; resources
   org.apache.jena.query.Dataset

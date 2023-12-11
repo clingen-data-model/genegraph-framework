@@ -3,6 +3,9 @@
   (:import [java.io ByteArrayInputStream])
   (:refer-clojure :exclude [read]))
 
+(defprotocol HasInstance
+  (instance [this]))
+
 (defprotocol IndexedWrite
   (write [this k v] [this k v commit-promise]))
 
@@ -25,6 +28,10 @@
 (defprotocol TopicBackingStore
   (store-offset [this topic offset])
   (retrieve-offset [this topic]))
+
+(defprotocol Snapshot
+  (store-snapshot [this storage-handle])
+  (restore-snapshot [this storage-handle]))
 
 (defmulti as-handle :type)
 
