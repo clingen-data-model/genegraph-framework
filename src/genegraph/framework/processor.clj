@@ -5,7 +5,8 @@
             [genegraph.framework.event :as event]
             [genegraph.framework.kafka :as kafka]
             [io.pedestal.interceptor :as interceptor]
-            [io.pedestal.interceptor.chain :as interceptor-chain])
+            [io.pedestal.interceptor.chain :as interceptor-chain]
+            [io.pedestal.log :as log])
   (:import [org.apache.kafka.clients.producer Producer]
            [java.util.concurrent ArrayBlockingQueue BlockingQueue TimeUnit]))
 
@@ -14,7 +15,7 @@
   event)
 
 (defn add-offset! [{::event/keys [producer consumer-group offset kafka-topic]
-                             :as event}]
+                    :as event}]
   (when (and producer consumer-group offset kafka-topic)
     (kafka/commit-offset event))
   event)
@@ -49,20 +50,33 @@
           effects))
   event)
 
-(defn commit-local-offset! [{::event/keys [backing-store offset topic] :as event}]
-  (when (and backing-store offset topic)
-    (event/record-offset event))
-  event)
+(defn record-local-offset! [{::event/keys [backing-store offset topic] :as event}]
+  (if (and backing-store offset topic)
+    (event/record-offset event)
+    event))
 
 (defn perform-local-effects! [event]
   (-> event
-      update-local-storage!
-      commit-local-offset!))
+      record-local-offset!
+      update-local-storage!))
 
 (def local-effects-interceptor
   (interceptor/interceptor
    {:name ::local-effects-interceptor
     :leave #(perform-local-effects! %)}))
+
+(defn deliver-completion-promise [event]
+  (when-let [p (::event/completion-promise event)]
+    (Thread/startVirtualThread
+     (fn []
+       (run! deref (::event/effect-promises event))
+       (deliver p true))))
+  event)
+
+(def deliver-completion-promise-interceptor
+  (interceptor/interceptor
+   {:name ::deliver-completion-promise-interceptor
+    :leave #(deliver-completion-promise %)}))
 
 (defn add-processor-defined-metadata [event processor]
   (merge event (::event/metadata processor)))
@@ -115,14 +129,19 @@
         (interceptor/interceptor? v) v
         :else (interceptor/interceptor v)))
 
+(defn process-event-effects! [event]
+  (-> event
+      perform-publish-effects!
+      perform-local-effects!
+      deliver-completion-promise))
+
 (defn process-event [processor event]
   (-> event
       (add-app-state processor)
       event/deserialize
       (interceptor-chain/enqueue (:interceptors processor))
       interceptor-chain/execute
-      perform-publish-effects!
-      perform-local-effects!))
+      process-event-effects!))
 
 (defn initial-offset
   "Return starting offset for subscribed topic from backing store.
@@ -189,7 +208,8 @@
     (into []
           (concat [(app-state-interceptor this)
                    local-effects-interceptor
-                   publish-effects-interceptor]
+                   publish-effects-interceptor
+                   deliver-completion-promise-interceptor]
                   (map ->interceptor interceptors))))
 
   p/Lifecycle
@@ -225,9 +245,7 @@
               (interceptor-chain/enqueue (:interceptors processor))
               interceptor-chain/execute))))
 
-(defn process-event-effects! [event]
-  perform-publish-effects!
-  perform-local-effects!)
+
 
 (defrecord ParallelProcessor [name
                               subscribe

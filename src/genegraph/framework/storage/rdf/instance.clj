@@ -2,7 +2,8 @@
   "Namespace for handling operations on persistent Jena datasets.
   Specifically designed around handling asychronous writes. "
   (:require [genegraph.framework.storage :as s]
-            [genegraph.framework.storage.rdf.types :as types])
+            [genegraph.framework.storage.rdf.types :as types]
+            [io.pedestal.log :as log])
   (:import [org.apache.jena.tdb2 TDB2Factory]
            [org.apache.jena.query Dataset ReadWrite TxnType]
            [org.apache.jena.rdf.model Model Resource ResourceFactory
@@ -81,9 +82,11 @@
 
   s/TopicBackingStore
   (store-offset [this topic offset]
+    (log/info :fn ::store-offset :topic topic :offset offset)
     (s/write this
              (topic-kw->iri topic)
              (offset->model topic offset)))
+  
   (retrieve-offset [this topic]
     (.begin this ReadWrite/READ)
     (let [o (model->offset (s/read this (topic-kw->iri topic)))]

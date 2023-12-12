@@ -97,7 +97,7 @@
    {:name ::log-system-event-interceptor
     :enter (fn [e] (p/log-event e))}))
 
-(defn create-default-system-processor []
+(def default-system-processor
   {:subscribe :system
    :name :default-system-processor
    :type :processor
@@ -111,7 +111,7 @@
     app
     (assoc-in app
               [:processors :default-system-processor]
-              (create-default-system-processor))))
+              default-system-processor)))
 
 (defmethod p/init :genegraph-app [app]
   (let [system-topic (create-system-topic)]
@@ -140,8 +140,9 @@
 ;;;;;
 
 
+
 (defn test-interceptor-fn [event]
-  (println "test-interceptor-fn " (::event/offset event ) ":" (::event/key event))
+  (log/info :fn test-interceptor-fn :keys (keys event))
   event
   #_(-> event
         (event/publish {::event/key (str "new-" (::event/key event))
@@ -272,6 +273,7 @@
 
   (def a2 (p/init app-def-2))
   (p/start a2)
+  (p/stop a2)
   (-> a2 :topics )
   (p/publish (get-in a2 [:topics :publish-to-test])
              {:payload
@@ -301,6 +303,6 @@
   (s/retrieve-offset @(get-in a2 [:storage :test-rocksdb :instance]) :test-topic)
   (processor/starting-offset (get-in a2 [:processors :test-processor]))
   (get-in a2 [:processors :test-processor :storage :test-rocksdb :instance])
-  (p/stop a2)
+
   )
 

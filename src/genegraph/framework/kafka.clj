@@ -10,15 +10,12 @@
            [java.time Duration]
            [java.util.concurrent BlockingQueue ArrayBlockingQueue TimeUnit]))
 
-
-
 (defn create-producer [cluster-def opts]
   (doto (KafkaProducer.
          (merge (:common-config cluster-def)
                 (:producer-config cluster-def)
                 opts))
     .initTransactions))
-
 
 (defn commit-offset [event]
   (.sendOffsetsToTransaction
@@ -47,7 +44,8 @@
    ::event/kafka-topic (.topic record)
    ::event/partition (.partition record)
    ::event/source :kafka
-   ::event/offset (.offset record)})
+   ::event/offset (.offset record)
+   ::event/completion-promise (promise)})
 
 (defn publish [topic event]
   (.send
