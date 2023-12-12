@@ -68,10 +68,12 @@
 (defn deliver-event
   "Offer event to local queue"
   [topic event]
-  (.offer (:queue topic)
-          event
-          (:timeout topic)
-          TimeUnit/MILLISECONDS))
+  (.offer (:event-status-queue topic) event (:timeout topic) TimeUnit/MILLISECONDS)
+  (.offer (:queue topic) event (:timeout topic) TimeUnit/MILLISECONDS))
+
+;; TODO START HERE
+;; events should be delivered to event-status-queue.
+;; need to implement the processing for this
 
 (defn end-offset [consumer]
   (-> (.endOffsets consumer (.assignment consumer)) first val))
@@ -352,7 +354,7 @@
                    (map #(assoc %
                                 ::event/topic name
                                 ::event/skip-publish-effects true))
-                   (run! #(.offer queue % timeout TimeUnit/MILLISECONDS)))
+                   (run! #(deliver-event this %)))
               (Thread/sleep 100))
             (.unsubscribe consumer)
             (swap! state assoc :status :stopped))
