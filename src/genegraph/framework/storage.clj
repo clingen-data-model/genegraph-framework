@@ -47,11 +47,3 @@
   (as-handle {:type :file
               :base "/users/tristan/data"
               :path "edntest.edn"}))
-
-;; write (key-value)
-;; get (key)
-;; query ? (create query object) -- how far does this abstraction go with Jena. Are we going to use it with relational too? JDBC? 
-;; delete (key)
-;; scan (prefix or range)
-;; delete range (prefix or range)
-

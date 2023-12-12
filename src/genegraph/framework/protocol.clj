@@ -1,5 +1,5 @@
 (ns genegraph.framework.protocol
-  "Defines protocols, multimethods, and commonly used functions
+  "Defines protocols, multimethods and commonly used functions
   for entities in Genegraph.")
 
 (defmulti init :type)
@@ -60,4 +60,3 @@
       (println "Exception in entity without system topic reference "
                (:name this))
       (clojure.stacktrace/print-stack-trace e))))
-

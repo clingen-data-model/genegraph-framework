@@ -4,7 +4,6 @@
             [genegraph.framework.processor :as processor]
             [genegraph.framework.protocol :as p]
             [genegraph.framework.storage :as s]
-            [genegraph.framework.storage.console-writer]
             [genegraph.framework.storage.rocksdb]
             [genegraph.framework.storage.rdf :as rdf]
             [genegraph.framework.storage.gcs]
