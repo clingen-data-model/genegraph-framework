@@ -65,12 +65,19 @@
    {:name ::local-effects-interceptor
     :leave #(perform-local-effects! %)}))
 
+(defn effect-error [event]
+  (some #(not= true %)
+        (filter
+         :commit-promise
+         (::event/effects event))))
+
 (defn deliver-completion-promise [event]
   (when-let [p (::event/completion-promise event)]
     (Thread/startVirtualThread
      (fn []
-       (run! deref (::event/effect-promises event))
-       (deliver p true))))
+       (if-let [error (effect-error event)]
+         (deliver p error)
+         (deliver p true)))))
   event)
 
 (def deliver-completion-promise-interceptor

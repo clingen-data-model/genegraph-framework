@@ -26,7 +26,7 @@
   (range-delete [this prefix] [this begin end]))
 
 (defprotocol TopicBackingStore
-  (store-offset [this topic offset])
+  (store-offset [this topic offset] [this topic offset commit-promise])
   (retrieve-offset [this topic]))
 
 (defprotocol Snapshot

@@ -1,7 +1,8 @@
 (ns genegraph.framework.kafka
   (:require [genegraph.framework.protocol :as p]
             [genegraph.framework.event :as event]
-            [genegraph.framework.event.store :as event-store])
+            [genegraph.framework.event.store :as event-store]
+            [io.pedestal.log :as log])
   (:import [org.apache.kafka.clients.admin Admin NewTopic CreateTopicsResult OffsetSpec]
            [org.apache.kafka.clients.producer Producer KafkaProducer ProducerRecord]
            [org.apache.kafka.clients.consumer Consumer KafkaConsumer ConsumerGroupMetadata
@@ -72,6 +73,9 @@
           (:timeout topic)
           TimeUnit/MILLISECONDS))
 
+(defn end-offset [consumer]
+  (-> (.endOffsets consumer (.assignment consumer)) first val))
+
 (defn poll-kafka-consumer
   "default method to poll a Kafka consumer for new records.
   returns vector of events converted to Clojure data. Optionally
@@ -88,7 +92,8 @@
   {:timeout 1000
    :buffer-size 100
    :kafka-options {"enable.auto.commit" false
-                   "auto.offset.reset" "earliest"}})
+                   "auto.offset.reset" "earliest"
+                   "isolation.level" "read_committed"}})
 
 (defn create-kafka-consumer [topic]
   (let [config (apply
@@ -161,9 +166,6 @@
           (.unsubscribe consumer)))
       (catch Exception e (p/exception topic e)))))
 
-(defn end-offset [consumer]
-  (-> (.endOffsets consumer (.assignment consumer)) first val))
-
 (defn topic->event-file
   "Copy the events in a kafka-backed topic to an event seq file."
   [topic event-store-handle]
@@ -231,6 +233,10 @@
   (reify ConsumerRebalanceListener
     (onPartitionsAssigned [_ partitions]
       (println "consumer rebalance offsets " (last-committed-offset topic))
+      (deliver (:end-offset @(:state topic))
+               (end-offset (:kafka-consumer @(:state topic))))
+      (log/info :source :consumer-rebalance-listener
+                :end-offset @(:end-offset @(:state topic)))
       (deliver (:initial-consumer-group-offset @(:state topic))
                (last-committed-offset topic)))
     (onPartitionsLost [_ partitions] [])
@@ -250,6 +256,11 @@
 
     p/Lifecycle
     (start [this]
+      (p/publish-system-update this
+                               {:source name
+                                :type :component-lifecycle
+                                :entity-type (:type this)
+                                :status :starting})
       (swap! state assoc :status :running)
       (.start
        (Thread.
@@ -299,6 +310,7 @@
             :queue (ArrayBlockingQueue. (:buffer-size topic-def-with-defaults))
             :state (atom {:status :stopped
                           :initial-local-offset (promise)
+                          :end-offset (promise)
                           :initial-consumer-group-offset (promise)})))))
 
 (defrecord KafkaProducerTopic
@@ -332,6 +344,9 @@
         (try
           (let [^KafkaConsumer consumer (create-local-kafka-consumer this)]
             (swap! state assoc :kafka-consumer consumer)
+            (log/info :source :kafka-reader-thread :status :starting)
+            (deliver (:end-offset @state) (end-offset consumer))
+            (log/info :source :kafka-reader-thread :end-offset @(:end-offset @state))
             (while (= :running (:status @state))
               (->> (poll-kafka-consumer
                     consumer
@@ -366,6 +381,7 @@
      (assoc topic-def-with-defaults
             :queue (ArrayBlockingQueue. (:buffer-size topic-def-with-defaults))
             :state (atom {:initial-local-offset (promise)
+                          :end-offset (promise)
                           :status :stopped})))))
 
 

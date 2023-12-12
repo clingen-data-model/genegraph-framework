@@ -52,6 +52,7 @@
          :exception e)
   (if (:system-topic this)
     (publish-system-update
+     this
      {:source this
       :type :exception
       :exception e})
@@ -59,3 +60,4 @@
       (println "Exception in entity without system topic reference "
                (:name this))
       (clojure.stacktrace/print-stack-trace e))))
+

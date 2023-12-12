@@ -82,10 +82,14 @@
 
   s/TopicBackingStore
   (store-offset [this topic offset]
-    (log/info :fn ::store-offset :topic topic :offset offset)
     (s/write this
              (topic-kw->iri topic)
              (offset->model topic offset)))
+  (store-offset [this topic offset commit-promise]
+    (s/write this
+             (topic-kw->iri topic)
+             (offset->model topic offset)
+             commit-promise))
   
   (retrieve-offset [this topic]
     (.begin this ReadWrite/READ)

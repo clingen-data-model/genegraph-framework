@@ -6,7 +6,7 @@
             [genegraph.framework.storage :as s]
             [genegraph.framework.storage.console-writer]
             [genegraph.framework.storage.rocksdb]
-            [genegraph.framework.storage.rdf]
+            [genegraph.framework.storage.rdf :as rdf]
             [genegraph.framework.storage.gcs]
             [genegraph.framework.storage.atom]
             [genegraph.framework.kafka :as kafka]
@@ -141,13 +141,34 @@
 
 
 
+(defn consumer-group-msg-interceptor [event]
+  (Thread/startVirtualThread
+   #(let [r @(::event/completion-promise event)]
+      (log/info :msg "effect complete" :result r :offset (::event/offset event))))
+  (event/store event
+               :test-jena
+               "http://example.com/test-graph"
+               (rdf/statements->model
+                [[:sepio/GeneValidityEvidenceLevelAssertion
+                  :rdf/type
+                  :sepio/Assertion]])))
+
+#_(p/publish (get-in a2 [:topics :publish-to-test])
+           {:payload
+            {::event/key "k18"
+             ::event/value "v19"
+             ::event/topic :test-topic}
+            #_#_#_#_::event/skip-local-effects true
+              ::event/skip-publish-effects true})
+
+#_(-> event
+      (event/publish {::event/key (str "new-" (::event/key event))
+                      ::event/data {:hgvs "NC_00000001:50000A>C"}
+                      ::event/topic :test-endpoint}))
+
+
 (defn test-interceptor-fn [event]
-  (log/info :fn test-interceptor-fn :keys (keys event))
-  event
-  #_(-> event
-        (event/publish {::event/key (str "new-" (::event/key event))
-                        ::event/data {:hgvs "NC_00000001:50000A>C"}
-                        ::event/topic :test-endpoint})))
+  (consumer-group-msg-interceptor event))
 
 (defn test-publisher-fn [event]
   (event/publish event (:payload event)))
@@ -176,7 +197,7 @@
              :kafka-consumer-group "testcg9"
              :kafka-cluster :local
              :kafka-topic "test"}
-            #_#_:test-reader
+            :test-reader
             {:name :test-reader
              :type :kafka-reader-topic
              :kafka-cluster :local
@@ -209,13 +230,19 @@
                  :name :test-processor
                  :type :parallel-processor
                  :kafka-cluster :local
-                 :backing-store :test-jena
                  :interceptors `[test-interceptor-fn]}
                 :test-publisher
                 {:name :test-publisher
                  :subscribe :publish-to-test
                  :kafka-cluster :local
                  :type :processor
+                 :interceptors `[test-publisher-fn]}
+                :test-reader-processor
+                {:name :test-reader-processor
+                 :subscribe :test-reader
+                 :kafka-cluster :local
+                 :type :processor
+                 :backing-store :test-jena
                  :interceptors `[test-publisher-fn]}
                 :test-endpoint
                 {:name :test-endpoint
@@ -286,7 +313,7 @@
   (p/publish (get-in a2 [:processors :test-processor :system-topic])
              {:key :k :type :system-event})
 
-  (p/publish-system-update (get-in a2 [:processors :test-processor])
+  (p/publish-system-update (get-in a2 [:topics :test-topic])
                            {:key :k :type :system-event})
 
   (-> a2 :processors :test-processor :system-topic)

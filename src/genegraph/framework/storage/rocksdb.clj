@@ -146,8 +146,12 @@
 
   storage/TopicBackingStore
   {:store-offset
-   (fn [this topic offset]
-     (rocks-write! this topic offset))
+   (fn
+     ([this topic offset]
+      (rocks-write! this topic offset))
+     ([this topic offset commit-promise]
+      (rocks-write! this topic offset)
+      (deliver commit-promise true)))
    :retrieve-offset
    (fn [this topic]
      (rocks-get this topic))})
