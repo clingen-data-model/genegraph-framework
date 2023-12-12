@@ -9,7 +9,7 @@
             OffsetAndMetadata ConsumerRebalanceListener]
            [org.apache.kafka.common KafkaFuture TopicPartition]
            [java.time Duration]
-           [java.util.concurrent BlockingQueue ArrayBlockingQueue TimeUnit]))
+           [java.util.concurrent BlockingQueue ArrayBlockingQueue LinkedBlockingQueue TimeUnit]))
 
 (defn create-producer [cluster-def opts]
   (doto (KafkaProducer.
@@ -88,12 +88,19 @@
         iterator-seq
         (mapv #(-> % consumer-record->event (merge m))))))
 
-(def topic-defaults
-  {:timeout 1000
-   :buffer-size 100
-   :kafka-options {"enable.auto.commit" false
-                   "auto.offset.reset" "earliest"
-                   "isolation.level" "read_committed"}})
+(defn consumer-topic-defaults [topic-def]
+  (merge {:timeout 1000
+          :queue (ArrayBlockingQueue. (:buffer-size topic-def 100))
+          :event-status-queue (LinkedBlockingQueue.)
+          :kafka-options {"enable.auto.commit" false
+                          "auto.offset.reset" "earliest"
+                          "isolation.level" "read_committed"}
+          :initial-local-offset (promise)
+          :end-offset-at-start (promise)
+          :initial-consumer-group-offset (promise)
+          :state (atom {:delivered-up-to-date-event? false
+                        :status :stopped})}
+         topic-def))
 
 (defn create-kafka-consumer [topic]
   (let [config (apply
@@ -106,15 +113,12 @@
       (KafkaConsumer. config))))
 
 (defn backing-store-lags-consumer-group? [topic]
-  (let [state @(:state topic)
-        local-offset (deref (:initial-local-offset state) 100 :timeout)
-        cg-offset (deref (:initial-consumer-group-offset state) 100 :timeout)]
-    (println "backing-store-lags-consumer-group? "
-             (:name topic)
-             " "
-             local-offset
-             " "
-             cg-offset)
+  (let [local-offset (deref (:initial-local-offset topic) 100 :timeout)
+        cg-offset (deref (:initial-consumer-group-offset topic) 100 :timeout)]
+    (log/info :fn ::backing-store-lags-consumer-group?
+              :topic (:name topic)
+              :local-offset local-offset
+              :cg-offset cg-offset)
     (cond
       (or (= :timeout local-offset) (= :timeout cg-offset)) :timeout
       (and (number? local-offset) (number? cg-offset)) (< local-offset cg-offset)
@@ -131,13 +135,12 @@
   ([topic consumer]
    (.position consumer
               (TopicPartition. (:kafka-topic topic) 0)
-              (Duration/ofMillis (or (:timeout topic)
-                                     (:timeout topic-defaults))))))
+              (Duration/ofMillis (or (:timeout topic) 5000)))))
 
 (defn create-local-kafka-consumer
   "Create a local Kafka consumer, initialzed to initial-offset"
   ([topic]
-   (create-local-kafka-consumer topic @(:initial-local-offset @(:state topic))))
+   (create-local-kafka-consumer topic @(:initial-local-offset topic)))
   ([topic initial-offset]
    (let [topic-partition (TopicPartition. (:kafka-topic topic) 0)]
      (doto (create-kafka-consumer topic)
@@ -149,9 +152,9 @@
    If nil is provided for initial offset, return immediately.
    If the maximum available offset is nil, or not provided."
   [topic]
-  (let [last-offset @(:initial-consumer-group-offset @(:state topic))]
+  (let [last-offset @(:initial-consumer-group-offset topic)]
     (try 
-      (when-let [offset @(:initial-local-offset @(:state topic))]
+      (when-let [offset @(:initial-local-offset topic)]
         (let [^KafkaConsumer consumer (create-local-kafka-consumer topic offset)]
           (while (and (= :running (:status @(:state topic)))
                       (< (kafka-position topic consumer) last-offset))
@@ -233,11 +236,9 @@
   (reify ConsumerRebalanceListener
     (onPartitionsAssigned [_ partitions]
       (println "consumer rebalance offsets " (last-committed-offset topic))
-      (deliver (:end-offset @(:state topic))
+      (deliver (:end-offset-at-start topic)
                (end-offset (:kafka-consumer @(:state topic))))
-      (log/info :source :consumer-rebalance-listener
-                :end-offset @(:end-offset @(:state topic)))
-      (deliver (:initial-consumer-group-offset @(:state topic))
+      (deliver (:initial-consumer-group-offset topic)
                (last-committed-offset topic)))
     (onPartitionsLost [_ partitions] [])
     (onPartitionsRevoked [_ partitions] [])))
@@ -300,18 +301,16 @@
       (publish this event))
   
     p/Offsets
-    (set-offset! [this offset] (deliver (:initial-local-offset @state) offset)))
+    (set-offset! [this offset] (deliver (:initial-local-offset this) offset)))
+
+(defn initial-consumer-state []
+  {:initial-local-offset (promise)
+   :end-offset-at-start (promise)
+   :delivered-up-to-date-event? false
+   :status :stopped})
 
 (defmethod p/init :kafka-consumer-group-topic  [topic-definition]
-  (let [topic-def-with-defaults (merge topic-defaults
-                                       topic-definition)]
-    (map->KafkaConsumerGroupTopic
-     (assoc topic-def-with-defaults
-            :queue (ArrayBlockingQueue. (:buffer-size topic-def-with-defaults))
-            :state (atom {:status :stopped
-                          :initial-local-offset (promise)
-                          :end-offset (promise)
-                          :initial-consumer-group-offset (promise)})))))
+  (map->KafkaConsumerGroupTopic (consumer-topic-defaults topic-definition)))
 
 (defrecord KafkaProducerTopic
     [name
@@ -345,8 +344,7 @@
           (let [^KafkaConsumer consumer (create-local-kafka-consumer this)]
             (swap! state assoc :kafka-consumer consumer)
             (log/info :source :kafka-reader-thread :status :starting)
-            (deliver (:end-offset @state) (end-offset consumer))
-            (log/info :source :kafka-reader-thread :end-offset @(:end-offset @state))
+            (deliver (:end-offset-at-start this) (end-offset consumer))
             (while (= :running (:status @state))
               (->> (poll-kafka-consumer
                     consumer
@@ -372,18 +370,10 @@
   p/Offsets
   (set-offset! [this offset]
     (println "set offset " offset)
-    (deliver (:initial-local-offset @state) offset)))
+    (deliver (:initial-local-offset this) offset)))
 
 (defmethod p/init :kafka-reader-topic  [topic-definition]
-  (let [topic-def-with-defaults (merge topic-defaults
-                                       topic-definition)]
-    (map->KafkaReaderTopic
-     (assoc topic-def-with-defaults
-            :queue (ArrayBlockingQueue. (:buffer-size topic-def-with-defaults))
-            :state (atom {:initial-local-offset (promise)
-                          :end-offset (promise)
-                          :status :stopped})))))
-
+  (map->KafkaReaderTopic (consumer-topic-defaults topic-definition)))
 
 (comment
   (def t
