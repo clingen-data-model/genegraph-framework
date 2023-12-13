@@ -57,13 +57,17 @@
        event/serialize
        event->producer-record)))
 
-;; TODO, rename or move to generic topic ns
 (defn poll
   "Poll event queue for events (already pulled from Kafka)."
   [topic]
-  (.poll (:queue topic)
-         (:timeout topic)
-         TimeUnit/MILLISECONDS))
+  (when-let [event (.poll (:queue topic)
+                          (:timeout topic)
+                          TimeUnit/MILLISECONDS)]
+    (swap! (:state topic)
+           assoc
+           :last-delivered-event-offset
+           (::event/offset event))
+    event))
 
 (defn deliver-event
   "Offer event to local queue"
@@ -71,12 +75,54 @@
   (.offer (:event-status-queue topic) event (:timeout topic) TimeUnit/MILLISECONDS)
   (.offer (:queue topic) event (:timeout topic) TimeUnit/MILLISECONDS))
 
-;; TODO START HERE
-;; events should be delivered to event-status-queue.
-;; need to implement the processing for this
+
+(defn topic-up-to-date?
+  "A TOPIC is considered up to date when processing has completed up
+  to the last available offset when the application was started."
+  [topic]
+  (let [last-completed-offset (:last-completed-offset @(:state topic))
+        local-offset @(:initial-local-offset topic)
+        cg-offset @(:initial-consumer-group-offset topic)
+        last-offset @(:end-offset-at-start topic)]
+    (or  (and last-completed-offset (<= last-offset last-completed-offset))
+         (and (if local-offset (<= last-offset local-offset) true)
+              (if cg-offset (<= last-offset cg-offset) true)))))
+
+(defn deliver-up-to-date-event-if-needed [topic]
+  (when (and (not (:delivered-up-to-date-event? @(:state topic)))
+             (topic-up-to-date? topic))
+    (p/publish-system-update topic
+                             {:source (:name topic)
+                              :state :up-to-date
+                              :type :component-state-update})
+    (swap! (:state topic) assoc :delivered-up-to-date-event? true)))
+
+(defn handle-event-status-updates [topic event]
+  (let [status @(::event/completion-promise event)]
+    (swap! (:state topic) assoc :last-completed-offset (::event/offset event))
+    (log/info :fn ::handle-event-status-updates
+              :offset (::event/offset event)
+              :status status)))
+
+(defn start-status-queue-monitor [topic]
+  (.start
+   (Thread.
+    (fn []
+      (while (p/running? topic)
+        (try
+          (when-let [event (.poll (:event-status-queue topic)
+                                  (:timeout topic)
+                                  TimeUnit/MILLISECONDS)]
+            (handle-event-status-updates topic event))
+          (catch Exception e
+            (clojure.stacktrace/print-stack-trace e))))))))
 
 (defn end-offset [consumer]
-  (-> (.endOffsets consumer (.assignment consumer)) first val))
+  ;; Per Kafka docs, end offset reported by the consumer is
+  ;; always the next offset *past* the last record in the
+  ;; topic partition, we want the offset of the last record,
+  ;; so decrement by one.
+  (-> (.endOffsets consumer (.assignment consumer)) first val dec))
 
 (defn poll-kafka-consumer
   "default method to poll a Kafka consumer for new records.
@@ -245,6 +291,10 @@
     (onPartitionsLost [_ partitions] [])
     (onPartitionsRevoked [_ partitions] [])))
 
+(defn perform-common-startup-actions! [topic]
+  (swap! (:state topic) assoc :status :running)
+  (Thread/startVirtualThread #(deliver-up-to-date-event-if-needed topic))
+  (start-status-queue-monitor topic))
 
 (defrecord KafkaConsumerGroupTopic
     [name
@@ -264,7 +314,7 @@
                                 :type :component-lifecycle
                                 :entity-type (:type this)
                                 :status :starting})
-      (swap! state assoc :status :running)
+      (perform-common-startup-actions! this)
       (.start
        (Thread.
         (fn []
@@ -294,9 +344,7 @@
 
     p/Consumer
     (poll [this]
-      (when-let [e (.poll queue timeout TimeUnit/MILLISECONDS)]
-        (swap! state assoc :kafka-most-recent-offset (::event/offset e))
-        e))
+      (poll this))
 
     p/Publisher
     (publish [this event]
@@ -304,12 +352,6 @@
   
     p/Offsets
     (set-offset! [this offset] (deliver (:initial-local-offset this) offset)))
-
-(defn initial-consumer-state []
-  {:initial-local-offset (promise)
-   :end-offset-at-start (promise)
-   :delivered-up-to-date-event? false
-   :status :stopped})
 
 (defmethod p/init :kafka-consumer-group-topic  [topic-definition]
   (map->KafkaConsumerGroupTopic (consumer-topic-defaults topic-definition)))
@@ -338,7 +380,8 @@
 
   p/Lifecycle
   (start [this]
-    (swap! state assoc :status :running)
+    (perform-common-startup-actions! this)
+    (deliver (:initial-consumer-group-offset this) nil)
     (.start
      (Thread.
       (fn []
@@ -371,7 +414,6 @@
   
   p/Offsets
   (set-offset! [this offset]
-    (println "set offset " offset)
     (deliver (:initial-local-offset this) offset)))
 
 (defmethod p/init :kafka-reader-topic  [topic-definition]

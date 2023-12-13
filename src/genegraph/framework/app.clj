@@ -300,7 +300,11 @@
   (def a2 (p/init app-def-2))
   (p/start a2)
   (p/stop a2)
-  (-> a2 :topics )
+  (-> a2 :topics :test-topic :initial-consumer-group-offset)
+  (-> a2 :topics :test-topic :end-offset-at-start)
+  (-> a2 :topics :test-topic :state deref)
+  (-> a2 :topics :test-topic kafka/topic-up-to-date?)
+  
   (p/publish (get-in a2 [:topics :publish-to-test])
              {:payload
               {::event/key "k18"
@@ -308,6 +312,8 @@
                ::event/topic :test-topic}
               #_#_#_#_::event/skip-local-effects true
               ::event/skip-publish-effects true})
+
+
 
   (p/publish (get-in a2 [:processors :test-processor :system-topic])
              {:key :k :type :system-event})
