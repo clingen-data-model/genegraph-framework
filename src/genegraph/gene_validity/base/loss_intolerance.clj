@@ -1,5 +1,5 @@
-(ns genegraph.transform.loss-intolerance
-  (:require [genegraph.database.load :as l]
+(ns genegraph.gene-validity.base.loss-intolerance
+  #_(:require [genegraph.database.load :as l]
             [genegraph.database.query :as q]
             [genegraph.transform.common-score :as com]
             [clojure.data.csv :as csv]
@@ -14,7 +14,7 @@
 ;; (def ensembl-query "select ?s where { ?s a :so/ProteinCodingGene . ?s :owl/same-as ?ensembl }")
 ;; (def ensembl-query "select ?s where { ?s :owl/same-as ?ensembl }")
 
-(defn loss-row-to-triples [row]
+#_(defn loss-row-to-triples [row]
   (let [gene-symbol (first row)
         ;; ensembl-uri (str ensembl-base (nth row 63))
         ;; gene-uri (first (q/select ensembl-query {:ensembl ensembl-uri}))
@@ -26,14 +26,14 @@
       (log/debug :fn :loss-row-to-triples :gene gene-symbol :msg "Triple created for row" :row row)
       (com/common-row-to-triples gene-uri :cg/TriplosensitivityScore loss-score import-date "http://www.gnomad.org"))))
 
-(defn transform-loss-scores [loss-records]
+#_(defn transform-loss-scores [loss-records]
   (let [loss-table (nthrest (csv/read-csv loss-records :separator \tab) 1)]
     (->> loss-table
          (mapcat loss-row-to-triples)
          (remove nil?)
          l/statements-to-model)))
 
-(defmethod transform-doc :loss-intolerance
+#_(defmethod transform-doc :loss-intolerance
   [doc-def]
   (with-open [in (java.util.zip.GZIPInputStream. (io/input-stream (src-path doc-def)))]
     (transform-loss-scores (slurp in))))
