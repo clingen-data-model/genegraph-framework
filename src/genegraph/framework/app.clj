@@ -91,16 +91,50 @@
    app
    components))
 
+;;;; system processor
+
 (def log-system-event-interceptor
   (interceptor/interceptor
    {:name ::log-system-event-interceptor
-    :enter (fn [e] (p/log-event e))}))
+    :enter (fn [e]
+             (p/log-event e)
+             e)}))
 
-(def default-system-processor
+(defn register-listener [event]
+  (when (= :register-listener (:type event))
+    (swap! (::listeners event)
+           assoc
+           (:name event)
+           (select-keys event [:promise :predicate])))
+  event)
+
+(defn trigger-listeners [event]
+  (log/info :fn ::trigger-listeners :listeners (::listeners event))  
+  (run! #(deliver (:promise %) (dissoc event ::listeners))
+        (filter #((:predicate %) event)
+                (vals @(::listeners event))))
+  event)
+
+(defn handle-listeners [event]
+  (log/info :fn ::handle-listeners :listeners (::listeners event))
+  (-> event
+      register-listener
+      trigger-listeners))
+
+(def handle-listeners-interceptor
+  (interceptor/interceptor
+   {:name ::handle-listeners
+    :enter (fn [e] (handle-listeners e))}))
+
+(def default-system-processor 
   {:subscribe :system
    :name :default-system-processor
    :type :processor
-   :interceptors [log-system-event-interceptor]})
+   :interceptors [log-system-event-interceptor
+                  handle-listeners-interceptor]
+   :init-fn #(assoc % ::event/metadata {::listeners (atom {})})})
+
+;;; /system processor
 
 (defn has-custom-system-processor? [app]
   (some #(= :system (:subscribe %)) (:processors app)))
@@ -304,6 +338,8 @@
   (-> a2 :topics :test-topic :end-offset-at-start)
   (-> a2 :topics :test-topic :state deref)
   (-> a2 :topics :test-topic kafka/topic-up-to-date?)
+
+  (-> a2 :processors :default-system-processor)
   
   (p/publish (get-in a2 [:topics :publish-to-test])
              {:payload
@@ -321,6 +357,15 @@
   (p/publish-system-update (get-in a2 [:topics :test-topic])
                            {:key :k :type :system-event})
 
+  (def lp1 (promise))
+
+  @lp1
+
+  (p/publish-system-update (get-in a2 [:processors :test-processor])
+                           {:type :register-listener
+                            :predicate #(= :system-event (:type %))
+                            :promise lp1})
+
   (-> a2 :processors :test-processor :system-topic)
   (-> a2 :topics :system)
   
@@ -336,5 +381,21 @@
   (processor/starting-offset (get-in a2 [:processors :test-processor]))
   (get-in a2 [:processors :test-processor :storage :test-rocksdb :instance])
 
+  (def lp2 (promise))
+
+  (-> {::listeners (atom {:promise lp2
+                          :predicate #(= :system-event (:type %))})
+       :type :system-event
+       :key :boo}
+      ::listeners
+      deref
+      vals)
+
+  ()
+  
+  #_(run! #(deliver (:promise %) event)
+          (filter #((:predicate %) event)
+                  (:vals @(::listeners event))))
   )
+
 
