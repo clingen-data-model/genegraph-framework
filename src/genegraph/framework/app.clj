@@ -334,6 +334,7 @@
   (def a2 (p/init app-def-2))
   (p/start a2)
   (p/stop a2)
+
   (-> a2 :topics :test-topic :initial-consumer-group-offset)
   (-> a2 :topics :test-topic :end-offset-at-start)
   (-> a2 :topics :test-topic :state deref)
@@ -359,7 +360,7 @@
 
   (def lp1 (promise))
 
-  @lp1
+  lp1
 
   (p/publish-system-update (get-in a2 [:processors :test-processor])
                            {:type :register-listener
@@ -391,8 +392,6 @@
       deref
       vals)
 
-  ()
-  
   #_(run! #(deliver (:promise %) event)
           (filter #((:predicate %) event)
                   (:vals @(::listeners event))))
