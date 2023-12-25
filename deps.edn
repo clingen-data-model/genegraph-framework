@@ -52,7 +52,9 @@
   org.apache.jena/jena-shacl                        {:mvn/version "4.10.0"}
 
   ;; Google Cloud Storage
-  com.google.cloud/google-cloud-storage             {:mvn/version "2.22.0"}
+  com.google.cloud/google-cloud-storage             {:mvn/version "2.22.0"
+                                                     :exclusions
+                                                     [io.grpc/grpc-netty-shaded]}
 
 }}
 
