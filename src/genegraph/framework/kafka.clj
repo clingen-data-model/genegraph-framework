@@ -353,6 +353,8 @@
     p/Offsets
     (set-offset! [this offset] (deliver (:initial-local-offset this) offset)))
 
+(derive KafkaConsumerGroupTopic :genegraph/topic)
+
 (defmethod p/init :kafka-consumer-group-topic  [topic-definition]
   (map->KafkaConsumerGroupTopic (consumer-topic-defaults topic-definition)))
 
@@ -364,6 +366,8 @@
   p/Publisher
   (publish [this event]
     (publish this event)))
+
+(derive KafkaProducerTopic :genegraph/topic)
 
 (defmethod p/init :kafka-producer-topic [topic-definition]
   (map->KafkaProducerTopic topic-definition))
@@ -415,6 +419,8 @@
   p/Offsets
   (set-offset! [this offset]
     (deliver (:initial-local-offset this) offset)))
+
+(derive KafkaReaderTopic :genegraph/topic)
 
 (defmethod p/init :kafka-reader-topic  [topic-definition]
   (map->KafkaReaderTopic (consumer-topic-defaults topic-definition)))

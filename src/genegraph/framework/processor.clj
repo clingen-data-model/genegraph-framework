@@ -244,6 +244,8 @@
 (defmethod p/init :processor [processor-def]
   (map->Processor (processor-init processor-def)))
 
+(derive Processor :genegraph/processor)
+
 (defn process-parallel-event [processor event]
   (.put (:effect-queue processor)
         (future
@@ -297,6 +299,8 @@
     (swap! state assoc :status :stopped)
     (when kafka-cluster
       (.close @producer))))
+
+(derive ParallelProcessor :genegraph/processor)
 
 (defmethod p/init :parallel-processor [processor-def]
   (-> processor-def

@@ -20,6 +20,8 @@
   (publish [this event]
     (.offer queue event timeout TimeUnit/MILLISECONDS)))
 
+(derive SimpleQueueTopic :genegraph/topic)
+
 (defmethod p/init :simple-queue-topic [topic-definition]
   (let [topic-def-with-defaults (merge topic-defaults
                                        topic-definition)]
