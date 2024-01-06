@@ -55,6 +55,7 @@
   com.google.cloud/google-cloud-storage             {:mvn/version "2.22.0"
                                                      :exclusions
                                                      [io.grpc/grpc-netty-shaded]}
+  com.google.cloud/google-cloud-secretmanager       {:mvn/version "2.32.0"}
 
 }}
 

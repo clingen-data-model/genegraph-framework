@@ -9,6 +9,7 @@
             [genegraph.framework.storage.gcs]
             [genegraph.framework.storage.atom]
             [genegraph.framework.kafka :as kafka]
+            [genegraph.framework.kafka.admin :as kafka-admin]
             [genegraph.framework.topic :as topic]
             [genegraph.framework.event :as event]
             [io.pedestal.http :as http]
@@ -291,6 +292,8 @@
                    ::http/join? false}}})
 
 
+
+
 (defn print-event [event]
   (clojure.pprint/pprint event)
   event)
@@ -318,6 +321,8 @@
    :base "/users/tristan/data/genegraph-neo/"})
 
 (comment
+
+
   (def a3 (p/init app-def-3))
 
   (p/start a3)

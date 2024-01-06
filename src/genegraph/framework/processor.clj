@@ -169,7 +169,7 @@
     (deliver producer
              (kafka/create-producer
               kafka-cluster
-              {"transactional.id" (str name "-" (random-uuid))
+              {"transactional.id" name
                "max.request.size" (int (* 1024 1024 10))}))
     (deliver producer nil)))
 
