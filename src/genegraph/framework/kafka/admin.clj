@@ -85,12 +85,24 @@
   (AclBinding. (map->resource-pattern m)
                (map->access-control-entry m)))
 
-(defn kafka-entity-def->admin-actions
+(defmulti kafka-entity-def->admin-actions
   "Translate the definition of a topic in a Genegraph app into the actions
   needed to make that topic useable to a client:
   For topics, the required actions are:  create the topic, create the
   needed consumer group, create the read/write permissions on the topic.
   For processors, the kafka user needs to have permissions on the transactional-id"
+  type)
+
+(defmethod kafka-entity-def->admin-actions :default [_]
+  [])
+
+(defmethod kafka-entity-def->admin-actions :genegraph/processor
+  [processor]
+  [{:action :grant-permission-on-transactional-id
+    :name (name (:name processor))
+    :principal (:kafka-user processor)}])
+
+(defmethod kafka-entity-def->admin-actions :genegraph/topic
   [{:keys [kafka-topic kafka-consumer-group kafka-user]}]
   (->> [{:action :create-topic
          :name kafka-topic}
@@ -103,41 +115,21 @@
        (remove #(some nil? (vals %)))
        set))
 
-#_(defn admin-actions-by-cluster [app-def]
-    (update-vals (dissoc (group-by :kafka-cluster
-                                   (concat (vals (:topics app-def))
-                                           (vals (:processors app-def))))
-                         nil)
-                 (fn [topics]
-                   (reduce (fn [actions topic]
-                             (set/union actions
-                                        (kafka-topic-def->admin-actions topic)))
-                           #{}
-                           topics))))
-
 (defn admin-actions-by-cluster [app-def]
-  (map (fn [[cluster entities]]
-         (reduce (fn [actions entity]
-                   (set/union actions
-                              (kafka-entity-def->admin-actions entity)))
-                 #{}
-                 (map #(assoc % :kafka-user (:kafka-user cluster))
-                      entities)))
-       (dissoc (group-by :kafka-cluster
-                         (concat (vals (:topics app-def))
-                                 (vals (:processors app-def))))
-               nil)))
-
-;; refactor
-(defn topics-to-create [app-def admin]
-  (set/difference (app->kafka-topics app-def)
-                  (topics admin)))
-;;refactor
-(defn create-topics-in-cluster! [cluster genegraph-app-topics]
-  (with-open [admin (create-admin-client cluster)]
-    (let [app-kafka-topics (set (map :kafka-topic genegraph-app-topics))] 
-      (create-topics admin
-                     (set/difference app-kafka-topics (topics admin))))))
+  (reduce (fn [m [cluster entities]]
+            (assoc m
+                   cluster
+                   (reduce (fn [actions entity]
+                             (set/union actions
+                                        (kafka-entity-def->admin-actions entity)))
+                           #{}
+                           (map #(assoc % :kafka-user (:kafka-user cluster))
+                                entities))))
+          {}
+          (dissoc (group-by :kafka-cluster
+                            (concat (vals (:topics app-def))
+                                    (vals (:processors app-def))))
+                  nil)))
 
 (defn apply-create-topic-actions! [admin create-topic-actions]
   (create-topics admin
@@ -149,6 +141,8 @@
             (:grant-permission-on-topic actions-by-type))
        (concat (map #(assoc % :resource-type ResourceType/GROUP)
                     (:create-consumer-group-grant actions-by-type)))
+       (concat (map #(assoc % :resource-type ResourceType/TRANSACTIONAL_ID)
+                    (:grant-permission-on-transactional-id actions-by-type)))
        (map map->acl-binding)
        set))
 
@@ -164,150 +158,23 @@
       (apply-acl-binding-actions! admin
                                   (actions->acl-bindings actions-by-type)))))
 
+(defn configure-kafka-for-app! [app-def]
+  (run! apply-admin-actions! (admin-actions-by-cluster app-def)))
 
 (comment
 
   (admin-actions-by-cluster test-app-def)
 
-  (-> (admin-actions-by-cluster test-app-def)
-      first
-      apply-admin-actions!)
+  (configure-kafka-for-app! test-app-def)
   
-  (kafka-topic-def->admin-actions
-   {:name :test-topic
-    :type :kafka-consumer-group-topic
-    :kafka-consumer-group "testcg9"
-    :kafka-cluster :data-exchange
-    :kafka-topic "genegraph-test"
-    :kafka-user "kafka-user"})
-
-
-  (update-vals (group-by :kafka-cluster (vals (:topics test-app-def)))
-               (fn [topics]
-                 (reduce (fn [actions topic]
-                           (set/union actions
-                                      (kafka-topic-def->admin-actions topic)))
-                         #{}
-                         topics)))
-  
-  
-  (-> (:topics test-app-def)
-      (group-by :kafka-cluster)
-      (update-vals))
-  )
-
-;; refactor
-(defn app->kafka-topics [app-def]
-  (->> (vals (:topics app-def))
-       (filter :kafka-topic)
-       (map #(select-keys % [:kafka-topic :kafka-cluster :kafka-user]))
-       set))
-
-(defn app->kafka-topics [app-def]
-  (->> (vals (:topics app-def))
-       (filter :kafka-topic)
-       (map #(select-keys % [:kafka-topic :kafka-cluster :kafka-user]))
-       set))
-
-;;refacotr
-(defn app->kafka-consumer-groups [app-def]
-  (->> (vals (:topics app-def))
-       (filter :kafka-consumer-group)
-       (map #(select-keys % [:kafka-consumer-group :kafka-cluster :kafka-user]))
-       set))
-
-(comment
-  
-
-  )
-
-
-
-(defn create-topics-for-app! [app-def]
-  (run! (fn [[cluster topics]] (create-topics-in-cluster! cluster topics))
-        (group-by :kafka-cluster
-                  (app->kafka-topics app-def))))
-
-(defn create-consumer-group-acls-for-app-in-cluster! [cluster consumer-groups]
-  )
-
-(defn create-consumer-group-acls-for-app! [app-def]
-  (run! (fn [[cluster consumer]])))
-
-(defn create-acls-for-app! [app-def]
-  (run! (fn [[cluster topic-users]] (create-acls-in-cluster! cluster topic-users))
-        (group-by :kafka-cluster ())))
-
-(comment
-
-  (app->kafka-consumer-groups test-app-def)
-
-  (create-topics-for-app! test-app-def)
-  
-  (with-open [admin (create-admin-client dx-ccloud-dev)]
-    (topics-to-create test-app-def admin))
-  
-  (def kafka-user "User:2189780")
-  
-  (->> test-acls
-       (map acl-binding->map)
-       (filter #(= ResourceType/GROUP (:resource-type %)))
-       (filter #(= Operati (:operation %)))
-       (map :operation )
-       frequencies
-       )
-  
-  (-> test-acls first acl-binding->map)
-  
-  (with-open [admin (create-admin-client local-cluster)]
-    (create-topics admin ["test-topic"]))
-
-  (with-open [admin (create-admin-client local-cluster)]
-    (delete-topic admin "test-topic"))
-
-  (with-open [admin (create-admin-client dx-ccloud-dev)]
-    (topics admin))
-
-  (with-open [admin (create-admin-client local-cluster)]
-    (acls admin))
-  
-  (def test-acls
-    (with-open [admin (create-admin-client dx-ccloud-dev)]
-      (acls admin)))
-  
-
-  
-  )
-
-(comment
-  (def local-cluster
-    {:common-config {"bootstrap.servers" "localhost:9092"}
-     :producer-config {"key.serializer"
-                       "org.apache.kafka.common.serialization.StringSerializer",
-                       "value.serializer"
-                       "org.apache.kafka.common.serialization.StringSerializer"}
-     :consumer-config {"key.deserializer"
-                       "org.apache.kafka.common.serialization.StringDeserializer"
-                       "value.deserializer"
-                       "org.apache.kafka.common.serialization.StringDeserializer"}})
-
-  (def dx-ccloud
-    {:type :kafka-cluster
-     :common-config {"ssl.endpoint.identification.algorithm" "https"
-                     "sasl.mechanism" "PLAIN"
-                     "request.timeout.ms" "20000"
-                     "bootstrap.servers" "pkc-4yyd6.us-east1.gcp.confluent.cloud:9092"
-                     "retry.backoff.ms" "500"
-                     "security.protocol" "SASL_SSL"
-                     "sasl.jaas.config" (System/getenv "DX_JAAS_CONFIG")}
-     :consumer-config {"key.deserializer"
-                       "org.apache.kafka.common.serialization.StringDeserializer"
-                       "value.deserializer"
-                       "org.apache.kafka.common.serialization.StringDeserializer"}
-     :producer-config {"key.serializer"
-                       "org.apache.kafka.common.serialization.StringSerializer"
-                       "value.serializer"
-                       "org.apache.kafka.common.serialization.StringSerializer"}})
+  (kafka-entity-def->admin-actions
+   (p/init
+    {:name :test-topic
+     :type :kafka-consumer-group-topic
+     :kafka-consumer-group "testcg9"
+     :kafka-cluster :data-exchange
+     :kafka-topic "genegraph-test"
+     :kafka-user "kafka-user"}))
 
   (def dx-ccloud-dev
     {:type :kafka-cluster
@@ -382,60 +249,6 @@
                    {:name :test-endpoint
                     :type :processor
                     :interceptors `[identity]}}}))
-
-  (with-open [admin (create-admin-client local-cluster)]
-    (-> (.createTopics admin
-                       [(doto (NewTopic. "gene_validity_complete" 1 (short 1))
-                          (.configs {"retention.ms" "-1"}))])
-        .all
-        .get))
-
-  (with-open [admin (create-admin-client local-cluster)]
-    (-> (.listTopics admin)
-        .namesToListings
-        deref
-        keys))
-
-  (with-open [admin (create-admin-client local-cluster)]
-    (-> (.describeConfigs admin [(ConfigResource. ConfigResource$Type/TOPIC "gene_validity_complete")])
-        .all
-        derefp
-        first
-        val
-        .entries
-        first))
-
-  (with-open [admin (create-admin-client local-cluster)]
-    (-> (.createTopics admin
-                       [(doto (NewTopic. "gene_validity_sepio" 1 (short 1))
-                          (.configs {"retention.ms" "-1"}))])
-        .all
-        deref))
-
-  (with-open [admin (create-admin-client local-cluster)]
-    (-> (.deleteTopics admin ["gene_validity_sepio"])
-        .all
-        .get))
-
-  (with-open [admin (create-admin-client dx-ccloud)]
-    (-> (.listConsumerGroups admin)
-        .all
-        deref
-        ))
-
   
-  (def acls
-    (with-open [admin (create-admin-client dx-ccloud)]
-      (-> (.describeAcls admin AclBindingFilter/ANY)
-          .values
-          deref)))
-
-  (count acls)
-
-  (-> acls
-      first
-)
-
-  
-
   )
+
