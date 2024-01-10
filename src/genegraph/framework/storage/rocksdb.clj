@@ -4,7 +4,7 @@
             [taoensso.nippy :as nippy]
             [clojure.java.io :as io]
             [digest])
-  (:import (org.rocksdb Options ReadOptions RocksDB Slice CompressionType)
+  (:import (org.rocksdb Options ReadOptions RocksDB Slice CompressionType Checkpoint)
            java.util.Arrays
            java.nio.ByteBuffer
            java.io.ByteArrayOutputStream))
@@ -16,6 +16,28 @@
   (RocksDB/open (doto (Options.)
                   (.setCreateIfMissing true)
                   (.setCompressionType CompressionType/LZ4_COMPRESSION)) path))
+
+(defn create-checkpoint [rocksdb path]
+  (doto (Checkpoint/create rocksdb)
+    (.createCheckpoint path)
+    .close))
+
+(comment
+  (def rtest
+    (p/init {:name :rocks-test
+             :type :rocksdb
+             :path "/Users/tristan/data/genegraph-neo/test-rocks"}))
+
+  (p/start rtest)
+  @(:instance rtest)
+  (create-checkpoint @(:instance rtest)
+                     "/Users/tristan/data/genegraph-neo/test-rocks-snapshot")
+
+  (def c (Checkpoint/create @(:instance rtest)))
+  (.createCheckpoint c "/Users/tristan/data/genegraph-neo/test-rocks-snapshot-2")
+  (.close c)
+  
+  )
 
 (defrecord RocksDBInstance [name
                             type
@@ -34,7 +56,16 @@
     this)
   (stop [this]
     (.close @instance)
-    this))
+    this)
+
+  storage/Snapshot
+  (store-snapshot [this storage-handle]
+
+    )
+  (restore-snapshot [this storage-handle])
+  )
+
+(System/getProperty "java.io.tmpdir")
 
 (defmethod p/init :rocksdb [db-def]
   (map->RocksDBInstance

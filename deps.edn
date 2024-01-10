@@ -37,6 +37,10 @@
   ;; Kafka
   org.apache.kafka/kafka-clients                    {:mvn/version "3.6.1"}
 
+  ;; Compression for storage artifacts
+  org.apache.commons/commons-compress               {:mvn/version "1.24.0"}
+  org.lz4/lz4-java                                  {:mvn/version "1.8.0"}
+
   ;; Datastores
   
   ;; Rocks 

@@ -164,12 +164,12 @@
     nil))
 
 
-(defn init-kafka-producer! [{:keys [producer kafka-cluster name]}]
+(defn init-kafka-producer! [{:keys [producer kafka-cluster] :as p}]
   (if kafka-cluster
     (deliver producer
              (kafka/create-producer
               kafka-cluster
-              {"transactional.id" name
+              {"transactional.id" (name (:name p))
                "max.request.size" (int (* 1024 1024 10))}))
     (deliver producer nil)))
 

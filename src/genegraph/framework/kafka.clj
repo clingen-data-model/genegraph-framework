@@ -84,6 +84,12 @@
         local-offset @(:initial-local-offset topic)
         cg-offset @(:initial-consumer-group-offset topic)
         last-offset @(:end-offset-at-start topic)]
+    (log/info :fn :topic-up-to-date?
+              :topic (:name topic)
+              :last-completed-offset last-completed-offset
+              :local-offset local-offset
+              :cg-offset cg-offset
+              :last-offset last-offset)
     (or  (and last-completed-offset (<= last-offset last-completed-offset))
          (and (if local-offset (<= last-offset local-offset) true)
               (if cg-offset (<= last-offset cg-offset) true)))))
@@ -100,6 +106,7 @@
 (defn handle-event-status-updates [topic event]
   (let [status @(::event/completion-promise event)]
     (swap! (:state topic) assoc :last-completed-offset (::event/offset event))
+    (deliver-up-to-date-event-if-needed topic)
     (log/info :fn ::handle-event-status-updates
               :offset (::event/offset event)
               :status status)))
@@ -121,8 +128,10 @@
   ;; Per Kafka docs, end offset reported by the consumer is
   ;; always the next offset *past* the last record in the
   ;; topic partition, we want the offset of the last record,
-  ;; so decrement by one.
-  (-> (.endOffsets consumer (.assignment consumer)) first val dec))
+  ;; so decrement by two.
+  ;; Unclear why Kafka offsets now increment by twos rather than ones,
+  ;; but they do...
+  (-> (.endOffsets consumer (.assignment consumer)) first val (- 2)))
 
 (defn poll-kafka-consumer
   "default method to poll a Kafka consumer for new records.

@@ -169,6 +169,11 @@
   (log/info :source (:source e)
             :type (:type e)))
 
+(defmethod p/log-event :component-state-update [e]
+  (log/info :source (:source e)
+            :type (:type e)
+            :state (:state e)))
+
 ;;;;;
 ;; Stuff for testing
 ;;;;;
