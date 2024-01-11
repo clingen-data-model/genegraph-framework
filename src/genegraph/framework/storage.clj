@@ -13,7 +13,8 @@
            [org.apache.commons.compress.compressors.gzip
             GzipCompressorOutputStream GzipCompressorInputStream]
            [net.jpountz.lz4
-            LZ4FrameInputStream LZ4FrameOutputStream LZ4Factory])
+            LZ4FrameInputStream LZ4FrameOutputStream LZ4Factory]
+           [java.time Instant])
   (:refer-clojure :exclude [read]))
 
 (defprotocol HasInstance
@@ -42,9 +43,9 @@
   (store-offset [this topic offset] [this topic offset commit-promise])
   (retrieve-offset [this topic]))
 
-(defprotocol Snapshot
-  (store-snapshot [this storage-handle])
-  (restore-snapshot [this storage-handle]))
+#_(defprotocol Snapshot
+  (store-snapshot [this])
+  (restore-snapshot [this]))
 
 (defmulti as-handle :type)
 
@@ -104,6 +105,7 @@
             (io/copy is (.toFile file-path)))
           (recur (.getNextEntry is)))))))
 
+
 (comment
   (restore-archive
    "/Users/tristan/data/genegraph-neo/test-rocks-restore"
@@ -111,6 +113,13 @@
     :base "/users/tristan/data/genegraph-neo"
     :path "test-tarball.tar.lz4"})
   )
+
+(defn store-snapshot [this]
+  (store-archive (:path this) (:snapshot-handle this)))
+
+(defn restore-snapshot [this]
+  (when-not (-> this :path io/as-file .exists)
+    (restore-archive (:path this) (:snapshot-handle this))))
 
 (comment
   (as-handle {:type :file

@@ -42,7 +42,11 @@
   s/HasInstance
   (instance [_] @instance)
 
-  s/Snapshot
+
+  ;; This would be a little slow for production use.
+  ;; should adapt later on for creating a snapshot on a live system
+  
+  #_#_#_s/Snapshot
   (store-snapshot [this storage-handle]
     (with-open [os (-> storage-handle
                  (assoc :path (clojure.core/name name))
@@ -69,6 +73,8 @@
 
   p/Lifecycle
   (start [this]
+    (when (:load-snapshot this)
+      (s/restore-snapshot this))
     (reset! instance (i/start-dataset (dissoc this :instance))))
   (stop [this]
     (.close @instance)

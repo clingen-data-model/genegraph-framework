@@ -9,35 +9,11 @@
            java.nio.ByteBuffer
            java.io.ByteArrayOutputStream))
 
-
-
 (defn open [path]
   (io/make-parents path)
   (RocksDB/open (doto (Options.)
                   (.setCreateIfMissing true)
                   (.setCompressionType CompressionType/LZ4_COMPRESSION)) path))
-
-(defn create-checkpoint [rocksdb path]
-  (doto (Checkpoint/create rocksdb)
-    (.createCheckpoint path)
-    .close))
-
-(comment
-  (def rtest
-    (p/init {:name :rocks-test
-             :type :rocksdb
-             :path "/Users/tristan/data/genegraph-neo/test-rocks"}))
-
-  (p/start rtest)
-  @(:instance rtest)
-  (create-checkpoint @(:instance rtest)
-                     "/Users/tristan/data/genegraph-neo/test-rocks-snapshot")
-
-  (def c (Checkpoint/create @(:instance rtest)))
-  (.createCheckpoint c "/Users/tristan/data/genegraph-neo/test-rocks-snapshot-2")
-  (.close c)
-  
-  )
 
 (defrecord RocksDBInstance [name
                             type
@@ -51,21 +27,15 @@
   p/Lifecycle
   (start [this]
     (io/make-parents path)
-    (reset! instance
-            (open path))
+    (when (:load-snapshot this)
+      (storage/restore-snapshot this))
+    (reset! instance (open path))
     this)
   (stop [this]
     (.close @instance)
     this)
 
-  storage/Snapshot
-  (store-snapshot [this storage-handle]
-
-    )
-  (restore-snapshot [this storage-handle])
   )
-
-(System/getProperty "java.io.tmpdir")
 
 (defmethod p/init :rocksdb [db-def]
   (map->RocksDBInstance

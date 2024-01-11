@@ -59,7 +59,11 @@
    :storage {:test-rocksdb
              {:type :rocksdb
               :name :test-rocksdb
-              :path "/users/tristan/data/genegraph-neo/test-rocks"}}
+              :path "/Users/tristan/data/genegraph-neo/test-rocks"
+              :snapshot-handle {:type :file
+                                :base "/Users/tristan/data/genegraph-neo"
+                                :path "test-rocks-snapshot.tar.lz4"}
+              :load-snapshot true}}
    :topics {:test-topic
             {:name :test-topic
              :type :kafka-consumer-group-topic
@@ -102,6 +106,9 @@
   (kafka-admin/configure-kafka-for-app! ccloud-example-app)
   (p/start ccloud-example-app)
   (p/stop ccloud-example-app)
+
+  (storage/store-snapshot (get-in ccloud-example-app-def [:storage :test-rocksdb]))
+  (storage/restore-snapshot (get-in ccloud-example-app-def [:storage :test-rocksdb]))
 
   (p/publish (get-in ccloud-example-app [:topics :publish-to-test])
              {::event/key "k2"
