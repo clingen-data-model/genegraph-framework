@@ -106,12 +106,13 @@
     (swap! (::listeners event)
            assoc
            (:name event)
-           (select-keys event [:promise :predicate])))
+           (select-keys event [:promise :predicate :name])))
   event)
 
 (defn trigger-listeners [event]
   (log/info :fn ::trigger-listeners :listeners (::listeners event))  
-  (run! #(deliver (:promise %) (dissoc event ::listeners))
+  (run! (fn [listener]
+          (deliver (:promise listener) (dissoc event ::listeners)))
         (filter #((:predicate %) event)
                 (vals @(::listeners event))))
   event)

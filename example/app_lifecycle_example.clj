@@ -35,7 +35,6 @@
                        :key (::event/key e))
              (event/store e :test-rocksdb (::event/key e) (::event/data e)))}))
 
-
 (def ccloud-example-app-def
   {:type :genegraph-app
    :kafka-clusters {:ccloud

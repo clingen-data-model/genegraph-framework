@@ -234,7 +234,7 @@
       (loop [events (poll-kafka-consumer
                      consumer
                      {::event/format (:serialization topic)})]
-        (run! prn events)
+        (run! prn (map #(dissoc % ::event/completion-promise) events))
         (when (< (kafka-position topic consumer) (end-offset consumer))
           (recur (poll-kafka-consumer
                   consumer
