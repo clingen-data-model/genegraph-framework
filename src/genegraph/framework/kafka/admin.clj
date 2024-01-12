@@ -16,7 +16,8 @@
 ;; TODO -- these should have timeouts that throw exceptions
 
 (def default-topic-config
-  {"retention.ms" "-1"} ; retain indefinitely by default
+  {"retention.ms" "-1" ; retain indefinitely by default
+   "max.message.bytes" "8388608"} ; maximum allowable by confluent cloud
   )
 
 (defn create-admin-client [cluster-def]
@@ -195,6 +196,9 @@
                        "value.serializer"
                        "org.apache.kafka.common.serialization.StringSerializer"}})
 
+  (with-open [admin (create-admin-client dx-ccloud-dev)]
+    (delete-topic admin "genegraph-test")
+    (delete-topic admin "genegraph-test-out"))
 
   (def test-app-def
     (p/init
