@@ -41,7 +41,8 @@
   "Called when a component reaches a lifecycle milestone (exceptional or unexceptional).
   Reports the event to the system topic associated with the component."
   [this event]
-  (publish (:system-topic this) event))
+  (when-let [t (:system-topic this)]
+    (publish t event)))
 
 (defn exception
   "Registers exception e occurred in entity this"
