@@ -7,6 +7,9 @@
   (:import [com.zaxxer.hikari HikariDataSource]))
 
 (defrecord JdbcDb [connection-spec name instance state]
+  storage/HasInstance
+  (storage/instance [_] @instance)
+  
   p/Lifecycle
   (start [_]
     (reset! instance (connection/->pool HikariDataSource connection-spec))
