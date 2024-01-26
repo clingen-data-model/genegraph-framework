@@ -14,7 +14,9 @@
   p/Consumer
   (poll [this]
     (when-let [e (.poll queue timeout TimeUnit/MILLISECONDS)]
-      (assoc e ::event/topic name)))
+      (assoc e
+             ::event/topic name
+             ::event/completion-promise (promise))))
 
   p/Publisher
   (publish [this event]
