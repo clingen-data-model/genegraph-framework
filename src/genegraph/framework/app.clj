@@ -111,7 +111,6 @@
   event)
 
 (defn trigger-listeners [event]
-  (log/info :fn ::trigger-listeners :listeners (::listeners event))  
   (run! (fn [listener]
           (deliver (:promise listener) (dissoc event ::listeners)))
         (filter #((:predicate %) event)
@@ -119,7 +118,6 @@
   event)
 
 (defn handle-listeners [event]
-  (log/info :fn ::handle-listeners :listeners (::listeners event))
   (-> event
       register-listener
       trigger-listeners))

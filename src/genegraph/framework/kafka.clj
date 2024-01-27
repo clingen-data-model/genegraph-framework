@@ -84,12 +84,6 @@
         local-offset @(:initial-local-offset topic)
         cg-offset @(:initial-consumer-group-offset topic)
         last-offset @(:end-offset-at-start topic)]
-    (log/info :fn :topic-up-to-date?
-              :topic (:name topic)
-              :last-completed-offset last-completed-offset
-              :local-offset local-offset
-              :cg-offset cg-offset
-              :last-offset last-offset)
     (or  (and last-completed-offset (<= last-offset last-completed-offset))
          (and (if local-offset (<= last-offset local-offset) true)
               (if cg-offset (<= last-offset cg-offset) true)))))
@@ -106,10 +100,7 @@
 (defn handle-event-status-updates [topic event]
   (let [status @(::event/completion-promise event)]
     (swap! (:state topic) assoc :last-completed-offset (::event/offset event))
-    (deliver-up-to-date-event-if-needed topic)
-    (log/info :fn ::handle-event-status-updates
-              :offset (::event/offset event)
-              :status status)))
+    (deliver-up-to-date-event-if-needed topic)))
 
 (defn start-status-queue-monitor [topic]
   (.start
@@ -401,7 +392,6 @@
         (try
           (let [^KafkaConsumer consumer (create-local-kafka-consumer this)]
             (swap! state assoc :kafka-consumer consumer)
-            (log/info :source :kafka-reader-thread :status :starting)
             (deliver (:end-offset-at-start this) (end-offset consumer))
             (while (= :running (:status @state))
               (->> (poll-kafka-consumer
