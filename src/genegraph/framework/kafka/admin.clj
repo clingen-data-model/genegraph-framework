@@ -101,6 +101,7 @@
   [processor]
   [{:action :grant-permission-on-transactional-id
     :name (name (:name processor))
+    :operation AclOperation/WRITE
     :principal (:kafka-user processor)}])
 
 (defmethod kafka-entity-def->admin-actions :genegraph/topic
@@ -109,9 +110,15 @@
          :name kafka-topic}
         {:action :create-consumer-group-grant
          :name kafka-consumer-group
+         :operation AclOperation/READ
          :principal kafka-user}
         {:action :grant-permission-on-topic
          :name kafka-topic
+         :operation AclOperation/WRITE
+         :principal kafka-user}
+        {:action :grant-permission-on-topic
+         :name kafka-topic
+         :operation AclOperation/READ
          :principal kafka-user}]
        (remove #(some nil? (vals %)))
        set))
