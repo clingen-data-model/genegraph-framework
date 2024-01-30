@@ -9,9 +9,11 @@
            [org.apache.kafka.common.config
             ConfigResource ConfigResource$Type]
            [org.apache.kafka.common.acl
-            AclBindingFilter AclBinding AccessControlEntry AclOperation AclPermissionType]
+            AclBindingFilter AclBinding AccessControlEntry AclOperation AclPermissionType
+            AccessControlEntryFilter]
            [org.apache.kafka.common.resource
-            ResourcePattern PatternType ResourceType]))
+            ResourcePattern PatternType ResourceType ResourcePatternFilter]
+           [org.apache.kafka.clients.producer KafkaProducer]))
 
 ;; TODO -- these should have timeouts that throw exceptions
 
@@ -49,11 +51,36 @@
       .all
       deref))
 
-(defn acls [admin-client]
-  (-> (.describeAcls admin-client AclBindingFilter/ANY)
-      .values
+(defn acls 
+  ([admin-client]
+   (acls admin-client AclBindingFilter/ANY))
+  ([admin-client filter]
+   (-> (.describeAcls admin-client filter)
+       .values
+       deref
+       set)))
+
+(defn delete-acls [admin-client filter]
+  (-> (.deleteAcls admin-client [filter])
+      .all
       deref
       set))
+
+(defn delete-acls-for-user [admin-client user]
+  (delete-acls admin-client
+               (AclBindingFilter.
+                (ResourcePatternFilter. ResourceType/ANY
+                                        nil
+                                        PatternType/ANY)
+                (AccessControlEntryFilter. user
+                                           nil
+                                           AclOperation/ANY
+                                           AclPermissionType/ALLOW))))
+
+(comment
+  (with-open [admin (create-admin-client dx-ccloud-dev)]
+    (delete-acls-for-user admin "User:2189780"))
+  )
 
 (defn create-acls [admin-client acl-bindings]
   (-> (.createAcls admin-client acl-bindings)
@@ -73,7 +100,7 @@
 
 (defn map->access-control-entry [m]
   (AccessControlEntry. (:principal m)
-                       (:host m "'*'")
+                       (:host m "*")
                        (:operation m AclOperation/ALL)
                        (:permission-type m AclPermissionType/ALLOW)))
 
@@ -206,6 +233,9 @@
   (with-open [admin (create-admin-client dx-ccloud-dev)]
     (delete-topic admin "genegraph-test")
     (delete-topic admin "genegraph-test-out"))
+
+  (with-open [admin (create-admin-client dx-ccloud-dev)]
+    ())
 
   (def test-app-def
     (p/init
