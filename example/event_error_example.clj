@@ -105,7 +105,7 @@
                  :name :test-processor
                  :subscribe :in-topic
                  :interceptors [exception-handler-interceptor
-                                exception-interceptor]}
+                                test-interceptor]}
                 :test-recorder
                 {:type :processor
                  :name :test-recorder

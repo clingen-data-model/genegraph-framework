@@ -8,23 +8,36 @@
             [io.pedestal.interceptor.chain :as interceptor-chain]
             [io.pedestal.log :as log])
   (:import [org.apache.kafka.clients.producer Producer]
+           [org.apache.kafka.common TopicPartition]
+           [org.apache.kafka.clients.consumer ConsumerGroupMetadata OffsetAndMetadata]
            [java.util.concurrent ArrayBlockingQueue BlockingQueue TimeUnit]))
 
-(defn commit-kafka-transaction! [{^Producer producer ::event/producer :as event}]
-  (when producer (.commitTransaction producer))
+;; Kafka specific stuff
+;; This probably gets refactored as soon as another message broker is supported
+
+(defn commit-kafka-transaction! [event]
+  (when-let [^Producer p (::event/producer event)]
+    (.commitTransaction p))
   event)
 
-(defn add-offset! [{::event/keys [producer consumer-group offset kafka-topic]
-                    :as event}]
+(defn add-offset-to-tx! [{::event/keys [producer consumer-group offset kafka-topic]
+                          :as event}]
   (when (and producer consumer-group offset kafka-topic)
-    (kafka/commit-offset event))
+    (.sendOffsetsToTransaction
+     producer
+     {(TopicPartition. kafka-topic 0)
+      (OffsetAndMetadata. (+ 1 offset))} ; use next offset, per kafka docs
+     (ConsumerGroupMetadata. consumer-group)))
   event)
 
-(defn open-kafka-transaction! [{^Producer producer ::event/producer :as event}]
-  (when producer (.beginTransaction producer))
+(defn open-kafka-transaction! [event]
+  (when-let [^Producer p (::event/producer event)]
+    (.beginTransaction p))
   event)
 
-(defn publish-events! [{::event/keys [producer skip-publish-effects topics] :as event}]
+;; /Kafka stuff
+
+(defn publish-events! [{::event/keys [skip-publish-effects topics producer] :as event}]
   (when-not skip-publish-effects
     (run! #(if-let [topic (get topics (::event/topic %))]
              (p/publish topic (assoc % ::event/producer producer)))
@@ -35,7 +48,7 @@
   (-> event
       open-kafka-transaction!
       publish-events!
-      add-offset!
+      add-offset-to-tx!
       commit-kafka-transaction!))
 
 (def publish-effects-interceptor
@@ -103,19 +116,23 @@
   (assoc event ::event/backing-store (backing-store-instance processor)))
 
 (defn add-producer [event processor]
-  (if-let [producer (:producer processor)]
-    (assoc event ::event/producer (deref producer))
+  (if-let [producer (:producer @(:state processor))]
+    (assoc event ::event/producer producer)
     event))
 
 (defn add-topics [event processor]
   (assoc event ::event/topics (:topics processor)))
+
+(defn add-processor [event processor]
+  (assoc event ::event/processor processor))
 
 (defn add-app-state [event processor]
   (-> (add-processor-defined-metadata event processor)
       (add-storage-refs processor)
       (add-backing-store processor)
       (add-producer processor)
-      (add-topics processor)))
+      (add-topics processor)
+      (add-processor processor)))
 
 (defn app-state-interceptor [processor]
   (interceptor/interceptor
@@ -163,15 +180,13 @@
         (+ 1 o)))
     nil))
 
-
-(defn init-kafka-producer! [{:keys [producer kafka-cluster] :as p}]
-  (if kafka-cluster
-    (deliver producer
-             (kafka/create-producer
-              kafka-cluster
-              {"transactional.id" (name (:name p))
-               "max.request.size" (int (* 1024 1024 10))}))
-    (deliver producer nil)))
+(defn init-kafka-producer! [{:keys [kafka-cluster state] :as p}]
+  (when kafka-cluster
+    (let [producer (kafka/create-producer
+                    kafka-cluster
+                    {"transactional.id" (name (:name p))
+                     "max.request.size" (int (* 1024 1024 10))})]
+      (swap! state assoc :producer producer))))
 
 (defn set-topic-offset! [processor subscribed-topic]
   (when (satisfies? p/Offsets subscribed-topic)
@@ -184,7 +199,6 @@
   (let [init-fn (:init-fn processor-def identity)]
     (-> processor-def
         (assoc :state (atom {:status :stopped})
-               :producer (promise)
                :interceptors (map ->interceptor (:interceptors processor-def)))
         init-fn)))
 
@@ -202,7 +216,6 @@
                       topics
                       state
                       interceptors
-                      producer
                       kafka-cluster
                       backing-store
                       init-fn]
@@ -239,7 +252,7 @@
   (stop [this]
     (swap! state assoc :status :stopped)
     (when kafka-cluster
-      (.close @producer))))
+      (.close (:producer @state)))))
 
 (defmethod p/init :processor [processor-def]
   (map->Processor (processor-init processor-def)))
@@ -262,7 +275,6 @@
                               topics
                               state
                               interceptors
-                              producer
                               kafka-cluster
                               backing-store
                               effect-queue
@@ -298,7 +310,7 @@
   (stop [this]
     (swap! state assoc :status :stopped)
     (when kafka-cluster
-      (.close @producer))))
+      (.close (:producer @state)))))
 
 (derive ParallelProcessor :genegraph/processor)
 
