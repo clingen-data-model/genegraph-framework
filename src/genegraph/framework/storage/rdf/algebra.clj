@@ -1,5 +1,6 @@
 (ns genegraph.framework.storage.rdf.algebra
-  (:require [genegraph.framework.storage.rdf.names :as names])
+  (:require [genegraph.framework.storage.rdf.names :as names]
+            [io.pedestal.log :as log])
   (:import [org.apache.jena.rdf.model Model Statement ResourceFactory Resource Literal RDFList SimpleSelector ModelFactory]
              [org.apache.jena.query Dataset QueryFactory Query QueryExecution
               QueryExecutionFactory QuerySolutionMap]
@@ -21,21 +22,26 @@
                   (instance? Node s) s
                   (= '_ s) Var/ANON
                   (symbol? s) (Var/alloc (str s))
-                  (keyword? s) (.asNode (names/kw->iri s))
+                  (keyword? s) (NodeFactory/createURI (names/kw->iri s))
                   (string? s) (NodeFactory/createURI s)
                   :else (NodeFactory/createURI (str s)))
         predicate (cond
                     (instance? Node p) p
-                    (keyword? p) (.asNode (names/kw->iri p))
+                    (keyword? p) (NodeFactory/createURI (names/kw->iri p))
                     :else (NodeFactory/createURI (str p)))
         object (cond 
                  (instance? Node o) o
                  (symbol? o) (Var/alloc (str o))
-                 (keyword? o) (.asNode (names/kw->iri o))
+                 (keyword? o) (NodeFactory/createURI (names/kw->iri o))
                  (or (string? o)
                      (int? o)
                      (float? o)) (.asNode (ResourceFactory/createTypedLiteral o))
                  :else o)]
+    (log/info :fn ::triple
+              :subject subject
+              :predicate predicate
+              :object object
+              :stmt stmt)
     (Triple. subject predicate object)))
 
 (declare op)

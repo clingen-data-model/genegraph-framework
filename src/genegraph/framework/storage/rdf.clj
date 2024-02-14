@@ -150,6 +150,7 @@
   [r ks]
   (first (objects-of-properties r ks)))
 
+;; TODO replace with 'statement' in client code, then remove
 (defn ^Statement construct-statement
   "Takes a [s p o] triple, returns a single Statement."
   [[s p o]]
@@ -161,6 +162,10 @@
    (if (or (string? o) (int? o) (float? o))
      (ResourceFactory/createTypedLiteral o)
      (resource o))))
+
+(defn ^Statement statement [spo]
+  "Takes a [s p o] triple, returns a single Statement."
+  (construct-statement spo))
 
 (defn statements->model [statements]
   (.add (ModelFactory/createDefaultModel)
@@ -179,7 +184,7 @@
                    `(def ~% (-> ~filename# io/resource slurp create-query)))
                 queries))))
 
-(defn union
+(defn ^Model union
   "Create a new model that is the union of models"
   [& models]
   (let [union-model (ModelFactory/createDefaultModel)]
@@ -247,12 +252,29 @@
       (assoc ::event/format ::n-triples)
       event/serialize
       ::event/value)
+  
+  (names/add-prefixes
+   {"rdfs" "http://www.w3.org/2000/01/rdf-schema#"
+    "rdf" "http://www.w3.org/1999/02/22-rdf-syntax-ns#"})
+
+  (def q
+    (create-query
+     [:project ['c]
+      '[:bgp [c :rdf/type :rdfs/Class]]]))
+  
+  (-> {::event/format ::turtle
+       ::event/value (slurp "/users/tristan/data/genegraph-neo/base/dcterms.ttl")}
+      event/deserialize
+      ::event/data
+      q
+      count)
 
   (resource :dc/BibliographicResource)
 
   (.expandPrefix names/prefix-mapping "http://purl.org/dc/terms/Topic")
   (.expandPrefix names/prefix-mapping "dc:Topic")
   (.expandPrefix names/prefix-mapping "MONDO:0100038")
+
   )
 
 
