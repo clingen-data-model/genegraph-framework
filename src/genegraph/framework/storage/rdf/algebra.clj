@@ -37,11 +37,6 @@
                      (int? o)
                      (float? o)) (.asNode (ResourceFactory/createTypedLiteral o))
                  :else o)]
-    (log/info :fn ::triple
-              :subject subject
-              :predicate predicate
-              :object object
-              :stmt stmt)
     (Triple. subject predicate object)))
 
 (declare op)
