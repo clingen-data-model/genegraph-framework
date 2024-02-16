@@ -66,6 +66,9 @@
 
 (declare navize)
 
+(def type-property
+  (ResourceFactory/createProperty "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"))
+
 (extend-type Resource
   ThreadableData
   (ld-> [this ks] (reduce (fn [nodes k]
@@ -79,6 +82,15 @@
 
   AsKeyword
   (->kw [this] (names/iri->kw (str this)))
+
+  ;; TODO test and troubleshoot this
+  RDFType
+  (is-rdf-type? [this rdf-type] 
+    (let [t (ResourceFactory/createResource
+             (if (keyword? rdf-type) 
+               (names/kw->iri rdf-type)
+               rdf-type))]
+      (.hasProperty this type-property t)))
 
   AsModel
   (model [this] (.getModel this)))

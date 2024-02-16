@@ -225,6 +225,9 @@
   [^Model model-one ^Model model-two]
   (.isIsomorphicWith model-one model-two))
 
+(defn is-rdf-type? [this rdf-type]
+  (types/is-rdf-type? this rdf-type))
+
 ;; Event serialization/deserialization methods
 
 (defmethod event/deserialize ::rdf-serialization [event]
@@ -255,12 +258,20 @@
   
   (names/add-prefixes
    {"rdfs" "http://www.w3.org/2000/01/rdf-schema#"
-    "rdf" "http://www.w3.org/1999/02/22-rdf-syntax-ns#"})
+    "rdf" "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    "dc" "http://purl.org/dc/terms/"})
 
   (def q
     (create-query
      [:project ['c]
       '[:bgp [c :rdf/type :rdfs/Class]]]))
+  (def m
+    (-> {::event/format ::turtle
+        ::event/value (slurp "/users/tristan/data/genegraph-neo/base/dcterms.ttl")}
+        event/deserialize
+        ::event/data))
+
+  (is-rdf-type? (resource :dc/Agent m) :dc/BibliographicResource)
   
   (-> {::event/format ::turtle
        ::event/value (slurp "/users/tristan/data/genegraph-neo/base/dcterms.ttl")}
