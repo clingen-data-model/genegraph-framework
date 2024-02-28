@@ -3,10 +3,13 @@
             [genegraph.framework.protocol :as p]
             [genegraph.framework.storage :as storage]
             [genegraph.framework.storage.rdf :as rdf]
+            [genegraph.framework.storage.rocksdb :as rocksdb]
             [genegraph.framework.event :as event]
             [clojure.java.io :as io]
             [io.pedestal.log :as log]
-            [io.pedestal.interceptor :as interceptor]))
+            [io.pedestal.interceptor :as interceptor])
+  (:import [java.io BufferedInputStream BufferedOutputStream]
+           [net.jpountz.lz4 LZ4FrameInputStream LZ4FrameOutputStream]))
 
 (def test-base-path
   "/users/tristan/data/genegraph-neo/control-plane-test/")
@@ -37,6 +40,7 @@
              {:name :test-rocks
               :type :rocksdb
               :path (str test-base-path "test-rocks")
+              :load-snapshot true
               :snapshot-handle {:type :file
                                 :base test-base-path
                                 :path "rocks-snapshot.tar.lz4"}}
@@ -47,7 +51,7 @@
               :load-snapshot true
               :snapshot-handle {:type :file
                                 :base test-base-path
-                                :path "jena-snapshot.nq.lz4"}}}
+                                :path "jena-snapshot.nq.gz"}}}
    :topics {:control-plane
             {:name :control-plane
              :type :simple-queue-topic}}
@@ -65,9 +69,14 @@
   (p/start control-plane-app)
   (p/stop control-plane-app)
 
-  (storage/store-snapshot (get-in control-plane-app [:storage :test-jena]))
+  (storage/rocks-store-snapshot (get-in control-plane-app [:storage :test-jena]))
 
-  
+  (rocksdb/rocks-store-snapshot (get-in control-plane-app
+                                  [:storage :test-rocks]))
+
+  (rocksdb/rocks-restore-snapshot (get-in control-plane-app
+                                  [:storage :test-rocks]))
+
   (p/publish (get-in control-plane-app [:topics :control-plane])
              {::event/key "http://example.com/test"
               ::event/data (rdf/statements->model
@@ -109,3 +118,5 @@
                      io/input-stream)]
     (slurp is))
   )
+
+

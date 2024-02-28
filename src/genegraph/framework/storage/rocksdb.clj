@@ -7,13 +7,42 @@
   (:import (org.rocksdb Options ReadOptions RocksDB Slice CompressionType Checkpoint)
            java.util.Arrays
            java.nio.ByteBuffer
-           java.io.ByteArrayOutputStream))
+           java.nio.file.Path
+           [java.io ByteArrayOutputStream File]))
 
 (defn open [path]
   (io/make-parents path)
   (RocksDB/open (doto (Options.)
                   (.setCreateIfMissing true)
                   (.setCompressionType CompressionType/LZ4_COMPRESSION)) path))
+
+(defn snapshot-path [rocksdb-def]
+  (-> rocksdb-def
+      :path
+      io/file
+      .toPath
+      .getParent
+      (.resolve (str (name (:name rocksdb-def)) "-checkpoint-" (random-uuid)))
+      str))
+
+(defn cleanup-checkpoint [path]
+  (->> (io/file path)
+       file-seq
+       reverse
+       (run! io/delete-file)))
+
+(defn rocks-store-snapshot [rocksdb-def]
+  (let [path (snapshot-path rocksdb-def)]
+    (with-open [cp (Checkpoint/create @(:instance rocksdb-def))]
+      (.createCheckpoint cp path))
+    (storage/store-archive path (:snapshot-handle rocksdb-def))
+    (cleanup-checkpoint path)))
+
+(defn rocks-restore-snapshot [{:keys [snapshot-handle path] :as rocksdb-def}]
+  (when (and (storage/exists? (storage/as-handle snapshot-handle))
+             (not (.exists (io/file path))))
+    (p/system-update rocksdb-def {:state :restoring-snapshot})
+    (storage/restore-archive path snapshot-handle)))
 
 (defrecord RocksDBInstance [name
                             type
@@ -23,6 +52,12 @@
 
   storage/HasInstance
   (storage/instance [_] @instance)
+
+  storage/Snapshot
+  (store-snapshot [this]
+    (rocks-store-snapshot this))
+  (restore-snapshot [this]
+    (rocks-restore-snapshot this))
   
   p/Lifecycle
   (start [this]

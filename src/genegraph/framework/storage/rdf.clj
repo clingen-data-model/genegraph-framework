@@ -11,8 +11,7 @@
             [clojure.string :as string]
             [clojure.java.io :as io]
             [io.pedestal.log :as log])
-  (:import [java.io ByteArrayOutputStream ByteArrayInputStream
-            BufferedOutputStream BufferedInputStream]
+  (:import [java.io ByteArrayOutputStream ByteArrayInputStream]
            [org.apache.jena.rdf.model Model Resource ModelFactory
             ResourceFactory Statement Property]
            [org.apache.jena.tdb2 TDB2Factory DatabaseMgr]
@@ -20,8 +19,6 @@
             QuerySolutionMap]
            [org.apache.jena.sparql.algebra OpAsQuery]
            [org.apache.jena.riot RDFDataMgr Lang]
-           [net.jpountz.lz4
-            LZ4FrameInputStream LZ4FrameOutputStream LZ4Factory]
            [java.util.zip GZIPInputStream]))
 
 (def instance-defaults
@@ -54,30 +51,31 @@
   (instance [_] @instance)
 
   s/Snapshot
-  (store-snapshot [_]
+  (store-snapshot [this]
     (with-open [os (-> snapshot-handle
                        s/as-handle
-                       io/output-stream
-                       BufferedOutputStream.
-                       LZ4FrameOutputStream.)]
+                       io/output-stream)]
          (-> @instance
              .asDatasetGraph
              DatabaseMgr/backup
              io/file
              (io/copy os))))
   
-  (restore-snapshot [_]
-    (with-open [is (-> snapshot-handle
-                       s/as-handle
-                       io/input-stream
-                       BufferedInputStream.
-                       LZ4FrameInputStream.)]
-      (let [db @instance]
-        (try
-          (.begin db ReadWrite/WRITE)
-          (RDFDataMgr/read db is Lang/NQUADS)
-          (.commit db)
-          (finally (.end db))))))
+  (restore-snapshot [this]
+    (let [handle (s/as-handle snapshot-handle)]
+      (if (s/exists? handle)
+        (with-open [is (-> snapshot-handle
+                           s/as-handle
+                           io/input-stream
+                           GZIPInputStream.)]
+          (let [db @instance]
+            (try
+              (.begin db ReadWrite/WRITE)
+              (RDFDataMgr/read db is Lang/NQUADS)
+              (.commit db)
+              (finally (.end db)))))
+        (p/system-update this {:state :failed-restoring-snapshot
+                               :msg "Snapshot does not exist"}))))
 
   p/Lifecycle
   (start [this]
