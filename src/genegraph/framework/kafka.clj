@@ -80,10 +80,7 @@
 (defn deliver-up-to-date-event-if-needed [topic]
   (when (and (not (:delivered-up-to-date-event? @(:state topic)))
              (topic-up-to-date? topic))
-    (p/publish-system-update topic
-                             {:source (:name topic)
-                              :state :up-to-date
-                              :type :component-state-update})
+    (p/system-update topic {:state :up-to-date})
     (swap! (:state topic) assoc :delivered-up-to-date-event? true)))
 
 (defn handle-event-status-updates [topic event]
@@ -306,7 +303,7 @@
 
     p/Lifecycle
     (start [this]
-      (p/publish-system-update this
+      (p/system-update this
                                {:source name
                                 :type :component-lifecycle
                                 :entity-type (:type this)

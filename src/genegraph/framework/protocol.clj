@@ -4,7 +4,7 @@
 
 (defmulti init :type)
 
-(defmulti log-event :type)
+(defmulti log-event #(get-in % [:genegraph.framework.event/data :type]))
 
 (defprotocol Lifecycle
   (start [this])
@@ -37,12 +37,15 @@
   [this]
   (= :running (-> this :state deref :status)))
 
-(defn publish-system-update
+(defn system-update
   "Called when a component reaches a lifecycle milestone (exceptional or unexceptional).
   Reports the event to the system topic associated with the component."
-  [this event]
+  [this detail]
   (when-let [t (:system-topic this)]
-    (publish t event)))
+    (publish t {:genegraph.framework.event/data
+                (assoc detail
+                       :source (:name this)
+                       :entity-type (type this))})))
 
 (defn exception
   "Registers exception e occurred in entity this"
@@ -52,7 +55,7 @@
          :status :exception
          :exception e)
   (if (:system-topic this)
-    (publish-system-update
+    (system-update
      this
      {:source this
       :type :exception

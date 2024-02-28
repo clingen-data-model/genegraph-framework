@@ -1,7 +1,7 @@
 (ns genegraph.framework.storage
   (:require [clojure.java.io :as io])
   (:import [java.io
-            ByteArrayInputStream BufferedOutputStream BufferedInputStream]
+            ByteArrayInputStream File BufferedOutputStream BufferedInputStream]
            [java.nio.file
             Path Files StandardCopyOption LinkOption]
            [java.nio.file.attribute FileAttribute]
@@ -43,14 +43,21 @@
   (store-offset [this topic offset] [this topic offset commit-promise])
   (retrieve-offset [this topic]))
 
-#_(defprotocol Snapshot
+(defprotocol Snapshot
   (store-snapshot [this])
   (restore-snapshot [this]))
+
+(defprotocol HandleExists
+  (exists? [this]))
 
 (defmulti as-handle :type)
 
 (defmethod as-handle :file [def]
   (io/file (:base def) (:path def)))
+
+(extend-type File
+  HandleExists
+  (exists? [this] (.exists this)))
 
 (defn ->input-stream [source]
   (cond (map? source) (io/input-stream (as-handle source))
@@ -114,10 +121,10 @@
     :path "test-tarball.tar.lz4"})
   )
 
-(defn store-snapshot [this]
+#_(defn store-snapshot [this]
   (store-archive (:path this) (:snapshot-handle this)))
 
-(defn restore-snapshot [this]
+#_(defn restore-snapshot [this]
   (when-not (-> this :path io/as-file .exists)
     (restore-archive (:path this) (:snapshot-handle this))))
 

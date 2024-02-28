@@ -183,6 +183,10 @@
           :instance (atom (map->GCSBucket bucket-def)))))
 
 (extend-type Blob
+  storage/HandleExists
+  (storage/exists? [this]
+    (< 0 (.getSize this)))
+  
   io/IOFactory
   (io/make-input-stream [this opts]
     (-> this
@@ -243,6 +247,14 @@
       first
       io/writer
       (spit "this is another modified test file"))
+
+
+  (-> {:type :gcs
+       :bucket "genegraph-framework-dev"
+       :path "no-snapshot1"}
+      storage/as-handle
+      storage/exists?
+      #_(.exists (make-array Blob$BlobSourceOption 0)))
 
   
   )

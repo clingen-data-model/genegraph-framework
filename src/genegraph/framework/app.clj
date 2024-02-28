@@ -21,22 +21,35 @@
 (spec/def ::app
   (spec/keys :req-un [::topics]))
 
+(defn select-system-processor [processors]
+  (->> processors
+       vals
+       (filter #(= :system (:subscribe %)))
+       first))
+
+(defn non-system-processors [processors]
+  (->> processors
+       vals
+       (remove #(= :system (:subscribe %)))))
+
 (defrecord App [topics storage processors http-servers]
 
   p/Lifecycle
   (start [this]
+    (p/start (select-system-processor processors))
     (run! #(when (satisfies? p/Lifecycle %) (p/start %))
           (concat (vals storage)
                   (vals topics)
-                  (vals processors)
+                  (non-system-processors processors)
                   (vals http-servers)))
     this)
   (stop [this]
     (run! #(when (satisfies? p/Lifecycle %) (p/stop %))
           (concat (vals http-servers)
-                  (vals processors)
+                  (non-system-processors processors)
                   (vals storage)
                   (vals topics)))
+    (p/stop (select-system-processor processors))
     this))
 
 
@@ -166,10 +179,4 @@
 
 
 (defmethod p/log-event :default [e]
-  (log/info :source (:source e)
-            :type (:type e)))
-
-(defmethod p/log-event :component-state-update [e]
-  (log/info :source (:source e)
-            :type (:type e)
-            :state (:state e)))
+  (log/log (assoc (::event/data e) :level :info)))

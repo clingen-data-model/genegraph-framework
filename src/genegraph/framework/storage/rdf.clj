@@ -9,8 +9,10 @@
             [genegraph.framework.storage :as s]
             [genegraph.framework.event :as event]
             [clojure.string :as string]
-            [clojure.java.io :as io])
-  (:import [java.io ByteArrayOutputStream ByteArrayInputStream]
+            [clojure.java.io :as io]
+            [io.pedestal.log :as log])
+  (:import [java.io ByteArrayOutputStream ByteArrayInputStream
+            BufferedOutputStream BufferedInputStream]
            [org.apache.jena.rdf.model Model Resource ModelFactory
             ResourceFactory Statement Property]
            [org.apache.jena.tdb2 TDB2Factory DatabaseMgr]
@@ -18,6 +20,8 @@
             QuerySolutionMap]
            [org.apache.jena.sparql.algebra OpAsQuery]
            [org.apache.jena.riot RDFDataMgr Lang]
+           [net.jpountz.lz4
+            LZ4FrameInputStream LZ4FrameOutputStream LZ4Factory]
            [java.util.zip GZIPInputStream]))
 
 (def instance-defaults
@@ -37,33 +41,37 @@
        (do ~@body)
        (finally (.end ~db)))))
 
-(defrecord RDFStore [instance state queue-size text-assembly-path path name]
-
+(defrecord RDFStore [instance
+                     state
+                     queue-size
+                     text-assembly-path
+                     path
+                     name
+                     snapshot-handle
+                     system-topic]
+  
   s/HasInstance
   (instance [_] @instance)
 
-
-  ;; This would be a little slow for production use.
-  ;; should adapt later on for creating a snapshot on a live system
-  
-  #_#_#_s/Snapshot
-  (store-snapshot [this storage-handle]
-    (with-open [os (-> storage-handle
-                 (assoc :path (clojure.core/name name))
-                 s/as-handle
-                 io/output-stream)]
+  s/Snapshot
+  (store-snapshot [_]
+    (with-open [os (-> snapshot-handle
+                       s/as-handle
+                       io/output-stream
+                       BufferedOutputStream.
+                       LZ4FrameOutputStream.)]
          (-> @instance
              .asDatasetGraph
              DatabaseMgr/backup
              io/file
              (io/copy os))))
   
-  (restore-snapshot [this storage-handle]
-    (with-open [is (-> storage-handle
-                 (assoc :path (clojure.core/name name))
-                 s/as-handle
-                 io/input-stream
-                 GZIPInputStream.)]
+  (restore-snapshot [_]
+    (with-open [is (-> snapshot-handle
+                       s/as-handle
+                       io/input-stream
+                       BufferedInputStream.
+                       LZ4FrameInputStream.)]
       (let [db @instance]
         (try
           (.begin db ReadWrite/WRITE)
@@ -73,9 +81,15 @@
 
   p/Lifecycle
   (start [this]
-    (when (:load-snapshot this)
-      (s/restore-snapshot this))
-    (reset! instance (i/start-dataset (dissoc this :instance))))
+    (p/system-update this {:state :starting})
+    (let [instance-exists (.exists (io/file path))]
+      (reset! instance (i/start-dataset (dissoc this :instance)))
+      (when (and (:load-snapshot this) (not instance-exists))
+        (p/system-update this {:state :restoring-snapshot})
+        (s/restore-snapshot this)))
+    (p/system-update this {:state :started})
+    (reset! state :started))
+  
   (stop [this]
     (.close @instance)
     (reset! state :stopped)))

@@ -234,20 +234,22 @@
 
   p/Lifecycle
   (start [this]
-    (swap! state assoc :status :running)
-    ;; start producer first, else race condition
-    (init-kafka-producer! this)
-    (when-let [subscribed-topic (get-subscribed-topic this)]
-      (set-topic-offset! this subscribed-topic)
-      (.start
-       (Thread.
-        #(while (= :running (:status @state))
-           (try 
-             (when-let [event (p/poll subscribed-topic)]
-               (process-event this event))
-             (catch Exception e
-               (clojure.stacktrace/print-stack-trace e)))))))
-    (p/publish-system-update this {:source name :type :start}))
+    (when-not (= :running (:status @state))
+      (p/system-update this {:state :starting})
+      (swap! state assoc :status :running)
+      ;; start producer first, else race condition
+      (init-kafka-producer! this)
+      (when-let [subscribed-topic (get-subscribed-topic this)]
+        (set-topic-offset! this subscribed-topic)
+        (.start
+         (Thread.
+          #(while (= :running (:status @state))
+             (try 
+               (when-let [event (p/poll subscribed-topic)]
+                 (process-event this event))
+               (catch Exception e
+                 (clojure.stacktrace/print-stack-trace e)))))))
+      (p/system-update this {:state :started})))
   
   (stop [this]
     (swap! state assoc :status :stopped)
