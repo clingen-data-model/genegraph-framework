@@ -55,11 +55,12 @@
     (with-open [os (-> snapshot-handle
                        s/as-handle
                        io/output-stream)]
-         (-> @instance
-             .asDatasetGraph
-             DatabaseMgr/backup
-             io/file
-             (io/copy os))))
+      (let [backup-file (-> @instance
+                            .asDatasetGraph
+                            DatabaseMgr/backup
+                            io/file)]
+        (io/copy backup-file os)
+        (io/delete-file backup-file))))
   
   (restore-snapshot [this]
     (let [handle (s/as-handle snapshot-handle)]

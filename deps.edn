@@ -66,5 +66,11 @@
   com.google.cloud/google-cloud-storage             {:mvn/version "2.22.0"}
   com.google.cloud/google-cloud-secretmanager       {:mvn/version "2.32.0"}
 
+  ;; Lucene
+  ;; org.apache.lucene/lucene-core                     {:mvn/version "9.10.0"}
+  ;; org.apache.lucene/lucene-queryparser              {:mvn/version "9.10.0"}
+  ;; org.apache.lucene/lucene-codecs                   {:mvn/version "9.10.0"}
+  
+  
 }}
 
