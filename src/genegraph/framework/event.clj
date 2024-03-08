@@ -47,7 +47,8 @@
     (update event
             ::effects
             conj
-            {:command storage/write
+            {:store instance
+             :command storage/write
              :args [(get-in event [::storage/storage instance]) k v commit-promise]
              :commit-promise commit-promise})))
 

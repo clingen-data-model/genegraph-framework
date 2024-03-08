@@ -84,7 +84,7 @@
     (swap! (:state topic) assoc :delivered-up-to-date-event? true)))
 
 (defn handle-event-status-updates [topic event]
-  (let [status @(::event/completion-promise event)]
+  (let [status (deref (::event/completion-promise event) (* 1000 60 60) :timeout)]
     (swap! (:state topic) assoc :last-completed-offset (::event/offset event))
     (deliver-up-to-date-event-if-needed topic)))
 

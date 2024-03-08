@@ -16,7 +16,7 @@
     (when-let [e (.poll queue timeout TimeUnit/MILLISECONDS)]
       (assoc e
              ::event/topic name
-             ::event/completion-promise (promise))))
+             ::event/completion-promise (::event/completion-promise e (promise)))))
 
   p/Publisher
   (publish [this event]

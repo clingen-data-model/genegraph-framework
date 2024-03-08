@@ -78,4 +78,6 @@
   (p/publish (get-in ccloud-example-app [:topics :publish-to-test])
              {::event/key "k2"
               ::event/data {:b :b}})
+
+  (.size (get-in ccloud-example-app [:topics :test-topic :queue]))
   )

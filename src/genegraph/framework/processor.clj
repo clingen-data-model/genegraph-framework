@@ -59,7 +59,13 @@
 (defn update-local-storage! [{::event/keys [skip-local-effects effects] :as event}]
   (when-not skip-local-effects
     (run! (fn [{:keys [store command args commit-promise]}]
-            (apply command args))
+            (try
+              (apply command args)
+              (catch Exception e
+                (when-not (realized? commit-promise)
+                  (deliver commit-promise
+                           {:store store
+                            :exception e})))))
           effects))
   event)
 
@@ -79,7 +85,8 @@
     :leave #(perform-local-effects! %)}))
 
 (defn effect-error [event]
-  (some #(not= true %)
+  (some #(not= true (deref (:commit-promise %)
+                           (::event/effect-timeout event 200) :timeout))
         (filter
          :commit-promise
          (::event/effects event))))
@@ -89,7 +96,7 @@
     (Thread/startVirtualThread
      (fn []
        (if-let [error (effect-error event)]
-         (deliver p error)
+         (deliver p false)
          (deliver p true)))))
   event)
 

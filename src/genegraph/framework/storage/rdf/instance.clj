@@ -157,19 +157,28 @@
 (defn execute
   "Execute command on dataset"
   [dataset command]
-  (case (:command command)
-    :replace (.replaceNamedModel dataset
-                                 (:model-name command)
-                                 (:model command))
-    :remove (.removeNamedModel dataset
-                               (:model-name command))
-    (throw (ex-info "Invalid command" command))))
+  (try
+    (case (:command command)
+      :replace (.replaceNamedModel dataset
+                                   (:model-name command)
+                                   (:model command))
+      :remove (.removeNamedModel dataset
+                                 (:model-name command))
+      (throw (ex-info "Invalid command" command)))
+    (catch Exception e
+      (let [msg {:exception e
+                 :source (:name dataset)
+                 :fn ::execute}]
+           (if-let [p (:commit-promise command)]
+             (deliver p msg)
+             (log/log (assoc msg :level :error)))))))
 
 (defn deliver-commit-promise
   "Deliver promise when command is committed to the database."
   [command]
   (when-let [committed-promise (:commit-promise command)]
-    (deliver committed-promise true)))
+    (when-not (realized? committed-promise)
+      (deliver committed-promise true))))
 
 (defn write-loop
   "Read commands from queue and execute them on dataset. Pulls multiple records
@@ -177,17 +186,21 @@
   [{:keys [queue-size queue run-atom complete-promise dataset] :as dataset-record}]
   (let [buffer (ArrayList. queue-size)]
     (while @run-atom
-      (try
-        (when-let [first-command (.poll queue 1000 TimeUnit/MILLISECONDS)]
-          (.drainTo queue buffer queue-size)
-          (let [commands (cons first-command buffer)]
+      (when-let [first-command (.poll queue 1000 TimeUnit/MILLISECONDS)]
+        (.drainTo queue buffer queue-size)
+        (let [commands (cons first-command buffer)]
+          (try
             (.begin dataset ReadWrite/WRITE)
             (run! #(execute dataset %) commands)
             (.clear buffer)
             (.commit dataset)
             (.end dataset)
-            (run! deliver-commit-promise commands)))
-        (catch Exception e (println e))))
+            (run! deliver-commit-promise commands)
+            (catch Exception e
+              (log/error :fn ::write-loop
+                         :source (:name dataset)
+                         :exception e)
+              (.end dataset))))))
     (deliver complete-promise true)))
 
 (defn execute-async
