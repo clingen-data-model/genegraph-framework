@@ -83,8 +83,14 @@
     (p/system-update topic {:state :up-to-date})
     (swap! (:state topic) assoc :delivered-up-to-date-event? true)))
 
+;; TODO how to handle failed event effects
 (defn handle-event-status-updates [topic event]
-  (let [status (deref (::event/completion-promise event) (* 1000 60 60) :timeout)]
+  (let [status (deref (::event/completion-promise event)
+                      (::event/effect-timeout event (* 1000 60 60))
+                      :timeout)]
+    (when (= :timeout status)
+      (log/warn :fn ::handle-event-status-updates
+                :msg "Timeout retrieving event status."))
     (swap! (:state topic) assoc :last-completed-offset (::event/offset event))
     (deliver-up-to-date-event-if-needed topic)))
 

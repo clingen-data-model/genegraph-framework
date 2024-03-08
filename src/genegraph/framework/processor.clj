@@ -86,7 +86,8 @@
 
 (defn effect-error [event]
   (some #(not= true (deref (:commit-promise %)
-                           (::event/effect-timeout event 200) :timeout))
+                           (::event/effect-timeout event (* 1000 60 60))
+                           :timeout))
         (filter
          :commit-promise
          (::event/effects event))))
