@@ -63,7 +63,7 @@
   "Offer event to local queue"
   [topic event]
   (.offer (:event-status-queue topic) event)
-  (.offer (:queue topic) event))
+  (.put (:queue topic) event))
 
 
 (defn topic-up-to-date?
