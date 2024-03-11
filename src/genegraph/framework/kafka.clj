@@ -58,11 +58,12 @@
            (::event/offset event))
     event))
 
+;; <<loose end>> how to handle timeouts when the queue is full?
 (defn deliver-event
   "Offer event to local queue"
   [topic event]
-  (.offer (:event-status-queue topic) event (:timeout topic) TimeUnit/MILLISECONDS)
-  (.offer (:queue topic) event (:timeout topic) TimeUnit/MILLISECONDS))
+  (.offer (:event-status-queue topic) event)
+  (.offer (:queue topic) event))
 
 
 (defn topic-up-to-date?
