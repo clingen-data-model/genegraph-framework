@@ -125,7 +125,7 @@
 
 (defn trigger-listeners [event]
   (run! (fn [listener]
-          (deliver (:promise listener) (dissoc event ::listeners)))
+          (deliver (:promise listener) (::event/data event)))
         (filter #((:predicate %) event)
                 (vals @(::listeners event))))
   event)
