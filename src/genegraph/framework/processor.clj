@@ -167,8 +167,14 @@
       perform-local-effects!
       deliver-completion-promise))
 
+(defn deliver-execution-thread [event]
+  (when (::event/execution-thread event)
+    (deliver (::event/execution-thread event) (Thread/currentThread)))
+  event)
+
 (defn process-event [processor event]
   (-> event
+      deliver-execution-thread
       (add-app-state processor)
       event/deserialize
       (interceptor-chain/enqueue (:interceptors processor))

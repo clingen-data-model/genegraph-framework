@@ -2,7 +2,8 @@
   "Function for handling a store of events."
   (:require [clojure.edn :as edn]
             [clojure.pprint :refer [pprint]]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [io.pedestal.log :as log])
   (:import [java.io File PushbackReader FileOutputStream BufferedWriter FileInputStream BufferedReader]
            [java.nio ByteBuffer]
            [java.util.zip GZIPInputStream GZIPOutputStream]))

@@ -35,7 +35,8 @@
    ::event/partition (.partition record)
    ::event/source :kafka
    ::event/offset (.offset record)
-   ::event/completion-promise (promise)})
+   ::event/completion-promise (promise)
+   ::event/execution-thread (promise)})
 
 (defn publish [topic event]
   (.send
@@ -90,8 +91,13 @@
                       (::event/effect-timeout event (* 1000 60 60))
                       :timeout)]
     (when (= :timeout status)
-      (log/warn :fn ::handle-event-status-updates
-                :msg "Timeout retrieving event status."))
+      (let [thread-promise (::event/execution-thread event)]
+        (if (and thread-promise (realized? thread-promise)) 
+          (log/error :fn ::handle-event-status-updates
+                     :msg "Timeout retrieving event status."
+                     :stacktrace (.getStackTrace @thread-promise))
+          (log/error :fn ::handle-event-status-updates
+                     :msg "Timeout retrieving event status and no thread associated."))))
     (swap! (:state topic) assoc :last-completed-offset (::event/offset event))
     (deliver-up-to-date-event-if-needed topic)))
 
@@ -225,7 +231,10 @@
       (loop [events (poll-kafka-consumer
                      consumer
                      {::event/format (:serialization topic)})]
-        (run! prn (map #(dissoc % ::event/completion-promise) events))
+        (run! prn (map #(dissoc %
+                                ::event/completion-promise
+                                ::event/execution-thread)
+                       events))
         (when (< (kafka-position topic consumer) (end-offset consumer))
           (recur (poll-kafka-consumer
                   consumer
