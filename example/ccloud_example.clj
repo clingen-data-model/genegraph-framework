@@ -51,8 +51,12 @@
              :kafka-consumer-group "testcg9"
              :kafka-cluster :ccloud
              :serialization :json
+             :create-producer true
              :kafka-topic "genegraph-test"}
             :publish-to-test
+            {:name :publish-to-test
+             :type :simple-queue-topic}
+            :publish-to-test-without-transaction
             {:name :publish-to-test
              :type :simple-queue-topic}}
    :processors {:test-processor
@@ -66,6 +70,11 @@
                  :subscribe :publish-to-test
                  :kafka-cluster :ccloud
                  :type :processor
+                 :interceptors [publish-interceptor]}
+                :test-transactionless-publisher
+                {:name :genegraph-test-publisher
+                 :subscribe :publish-to-test-without-transaction
+                 :type :processor
                  :interceptors [publish-interceptor]}}})
 
 (comment
@@ -75,9 +84,16 @@
   (p/start ccloud-example-app)
   (p/stop ccloud-example-app)
 
+
   (p/publish (get-in ccloud-example-app [:topics :publish-to-test])
              {::event/key "k2"
               ::event/data {:b :b}})
 
+  (p/publish (get-in ccloud-example-app [:topics :publish-to-test-without-transaction])
+             {::event/key "k2"
+              ::event/data {:b :b}})
+
+  (get-in ccloud-example-app [:topics :test-topic :state])
+  
   (.size (get-in ccloud-example-app [:topics :test-topic :queue]))
   )

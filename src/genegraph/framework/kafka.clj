@@ -12,11 +12,13 @@
            [java.util.concurrent BlockingQueue ArrayBlockingQueue LinkedBlockingQueue TimeUnit]))
 
 (defn create-producer [cluster-def opts]
-  (doto (KafkaProducer.
-         (merge (:common-config cluster-def)
-                (:producer-config cluster-def)
-                opts))
-    .initTransactions))
+  (let [merged-opts (merge (:common-config cluster-def)
+                           (:producer-config cluster-def)
+                           opts)
+        p (KafkaProducer. merged-opts)]
+    (when (get merged-opts "transactional.id")
+      (.initTransactions p))
+    p))
 
 (defn event->producer-record
   [{topic ::event/kafka-topic
@@ -40,7 +42,7 @@
 
 (defn publish [topic event]
   (.send
-   (::event/producer event)
+   (or (::event/producer event) (:kafka-producer @(:state topic)))
    (-> event
        (assoc ::event/kafka-topic (:kafka-topic topic)
               ::event/format (:serialization topic))
@@ -300,11 +302,26 @@
     (onPartitionsLost [_ partitions] [])
     (onPartitionsRevoked [_ partitions] [])))
 
-(defn perform-common-startup-actions! [topic]
-  (reset! (:state topic) (initial-state))
-  (swap! (:state topic) assoc :status :running)
+(defn init-producer! [{:keys [kafka-cluster state]}]
+  (let [producer (create-producer kafka-cluster
+                                  {"max.request.size" (int (* 1024 1024 10))})]
+    (swap! state assoc :kafka-producer producer)))
+
+(defn perform-common-startup-actions! [{:keys [state] :as topic}]
+  (reset! state (initial-state))
+  (swap! state assoc :status :running)
+  (when (:create-producer topic)
+    (init-producer! topic))
   (Thread/startVirtualThread #(deliver-up-to-date-event-if-needed topic))
   (start-status-queue-monitor topic))
+
+(defn perform-common-shutdown-actions! [{:keys [state]}]
+  (swap! state assoc :status :stopping)
+  (when-let [p (:kafka-producer @state)]
+    (.close p))
+  (swap! state assoc :status :stopped))
+
+
 
 (defrecord KafkaConsumerGroupTopic
     [name
@@ -320,10 +337,10 @@
     p/Lifecycle
     (start [this]
       (p/system-update this
-                               {:source name
-                                :type :component-lifecycle
-                                :entity-type (:type this)
-                                :status :starting})
+                       {:source name
+                        :type :component-lifecycle
+                        :entity-type (:type this)
+                        :status :starting})
       (perform-common-startup-actions! this)
       (.start
        (Thread.
@@ -350,7 +367,7 @@
               (catch Exception e (p/exception this e))))))))
   
     (stop [this]
-      (swap! state assoc :status :stopping))
+      (perform-common-shutdown-actions! this))
 
     p/Consumer
     (poll [this]
@@ -371,7 +388,18 @@
 (defrecord KafkaProducerTopic
     [name
      kafka-cluster
-     kafka-topic]
+     kafka-topic
+     state]
+
+  p/Lifecycle
+  (start [this]
+    (when (:create-producer this)
+      (init-producer! this)))
+  (stop [this]
+    (swap! state assoc :status :stopping)
+    (when-let [p (:kafka-producer @state)]
+      (.close p))
+    (swap! state assoc :status :stopped))
 
   p/Publisher
   (publish [this event]
@@ -380,7 +408,8 @@
 (derive KafkaProducerTopic :genegraph/topic)
 
 (defmethod p/init :kafka-producer-topic [topic-definition]
-  (map->KafkaProducerTopic topic-definition))
+  (map->KafkaProducerTopic
+   (assoc topic-definition :state (atom {:status :stopped}))))
 
 (defrecord KafkaReaderTopic
     [name
@@ -417,7 +446,7 @@
           (catch Exception e (p/exception this e)))))))
   
   (stop [this]
-    (swap! state assoc :status :stopping))
+    (perform-common-shutdown-actions! this))
 
   p/Consumer
   (poll [this] (poll this))
