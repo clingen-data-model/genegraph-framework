@@ -35,14 +35,14 @@
       keys
       set))
 
-(defn str->kafka-topic [s]
-  (doto (NewTopic. s 1 (short 3))
-    (.configs default-topic-config)))
+(defn create-topic-action->kafka-topic [{:keys [name config]}]
+  (doto (NewTopic. name 1 (short 3))
+    (.configs (merge default-topic-config config))))
 
-(defn create-topics [admin-client topics]
-  (log/info :fn :create-topics :topics topics)
+(defn create-topics [admin-client create-topic-actions]
+  (log/info :fn :create-topics :topics (map :name create-topic-actions))
   (-> (.createTopics admin-client
-                     (map str->kafka-topic topics))
+                     (map create-topic-action->kafka-topic create-topic-actions))
       .all
       deref))
 
@@ -132,9 +132,10 @@
     :principal (:kafka-user processor)}])
 
 (defmethod kafka-entity-def->admin-actions :genegraph/topic
-  [{:keys [kafka-topic kafka-consumer-group kafka-user]}]
+  [{:keys [kafka-topic kafka-topic-config kafka-consumer-group kafka-user]}]
   (->> [{:action :create-topic
-         :name kafka-topic}
+         :name kafka-topic
+         :config kafka-topic-config}
         {:action :create-consumer-group-grant
          :name kafka-consumer-group
          :operation AclOperation/READ
@@ -167,9 +168,10 @@
                   nil)))
 
 (defn apply-create-topic-actions! [admin create-topic-actions]
-  (create-topics admin
-                 (set/difference (set (map :name create-topic-actions))
-                                 (topics admin))))
+  (let [existant-topics (topics admin)
+        topics-to-create (remove #(existant-topics (:name %))
+                                 create-topic-actions)]
+    (create-topics admin topics-to-create)))
 
 (defn actions->acl-bindings [actions-by-type]
   (->> (map #(assoc % :resource-type ResourceType/TOPIC)
@@ -290,6 +292,36 @@
                    {:name :test-endpoint
                     :type :processor
                     :interceptors `[identity]}}}))
+
+
+  (def test-app-def-2
+    (p/init
+     {:type :genegraph-app
+      :kafka-clusters {:data-exchange dx-ccloud-dev}
+      :topics {:test-topic
+               {:name :test-topic
+                :type :kafka-consumer-group-topic
+                :kafka-consumer-group "testcg9"
+                :kafka-cluster :data-exchange
+                :kafka-topic "genegraph-test"
+                :kafka-topic-config
+                {"cleanup.policy" "compact"
+                 "delete.retention.ms" "100"}}
+               :publish-to-test
+               {:name :publish-to-test
+                :type :simple-queue-topic}}
+      :processors {:test-reader-processor
+                   {:name :test-reader-processor
+                    :subscribe :test-reader
+                    :kafka-cluster :data-exchange
+                    :type :processor
+                    :backing-store :test-jena
+                    :interceptors `[identity]}}}))
+
+  (configure-kafka-for-app! test-app-def-2)
+
+  (with-open [admin (create-admin-client dx-ccloud-dev)]
+    (delete-topic admin "genegraph-test"))
   
   )
 
