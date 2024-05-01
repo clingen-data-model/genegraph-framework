@@ -198,7 +198,8 @@
   (when kafka-cluster
     (let [producer (kafka/create-producer
                     kafka-cluster
-                    {"transactional.id" (name (:name p))
+                    {"transactional.id" (or (:kafka-transactional-id p)
+                                            (name (:name p)))
                      "max.request.size" (int (* 1024 1024 10))})]
       (swap! state assoc :producer producer))))
 

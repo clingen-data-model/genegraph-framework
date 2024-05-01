@@ -127,7 +127,8 @@
 (defmethod kafka-entity-def->admin-actions :genegraph/processor
   [processor]
   [{:action :grant-permission-on-transactional-id
-    :name (name (:name processor))
+    :name (or (:kafka-transactional-id processor)
+              (name (:name processor)))
     :operation AclOperation/WRITE
     :principal (:kafka-user processor)}])
 
