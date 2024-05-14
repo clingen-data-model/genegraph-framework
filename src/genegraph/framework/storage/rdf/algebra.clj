@@ -1,7 +1,7 @@
 (ns genegraph.framework.storage.rdf.algebra
   (:require [genegraph.framework.storage.rdf.names :as names]
             [io.pedestal.log :as log])
-  (:import [org.apache.jena.rdf.model Model Statement ResourceFactory Resource Literal RDFList SimpleSelector ModelFactory]
+  (:import [org.apache.jena.rdf.model Model Statement ResourceFactory Resource Literal RDFList ModelFactory]
              [org.apache.jena.query Dataset QueryFactory Query QueryExecution
               QueryExecutionFactory QuerySolutionMap]
              [org.apache.jena.sparql.algebra AlgebraGenerator Algebra OpAsQuery Op]
@@ -37,7 +37,7 @@
                      (int? o)
                      (float? o)) (.asNode (ResourceFactory/createTypedLiteral o))
                  :else o)]
-    (Triple. subject predicate object)))
+    (Triple/create subject predicate object)))
 
 (declare op)
 
