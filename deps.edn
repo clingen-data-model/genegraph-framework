@@ -54,13 +54,13 @@
   org.rocksdb/rocksdbjni                            {:mvn/version "8.8.1"}
   
   ;; Jena 
-  org.apache.jena/jena-arq                          {:mvn/version "4.10.0"}
-  org.apache.jena/jena-core                         {:mvn/version "4.10.0"}
-  org.apache.jena/jena-iri                          {:mvn/version "4.10.0"}
-  org.apache.jena/jena-tdb                          {:mvn/version "4.10.0"}
-  org.apache.jena/jena-tdb2                         {:mvn/version "4.10.0"}
-  org.apache.jena/jena-text                         {:mvn/version "4.10.0"}
-  org.apache.jena/jena-shacl                        {:mvn/version "4.10.0"}
+  org.apache.jena/jena-arq                          {:mvn/version "5.0.0"}
+  org.apache.jena/jena-core                         {:mvn/version "5.0.0"}
+  org.apache.jena/jena-iri                          {:mvn/version "5.0.0"}
+  org.apache.jena/jena-tdb                          {:mvn/version "5.0.0"}
+  org.apache.jena/jena-tdb2                         {:mvn/version "5.0.0"}
+  org.apache.jena/jena-text                         {:mvn/version "5.0.0"}
+  org.apache.jena/jena-shacl                        {:mvn/version "5.0.0"}
 
   ;; Google Cloud Storage
   com.google.cloud/google-cloud-storage             {:mvn/version "2.22.0"}
