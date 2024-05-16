@@ -33,13 +33,8 @@
       (.add Keywords/GRAPH array)
       (.build)))
 
-(defn frame [doc context frame]
+(defn frame [doc frame]
   (-> (JsonLd/frame doc frame)
-      (.context context)
-      .get))
-
-(defn compact [doc context]
-  (-> (JsonLd/compact doc context)
       .get))
 
 (defn serialize-json-object [json-object]
@@ -55,13 +50,11 @@
 (defn json-file->doc [path]
   (JsonDocument/of (json-file->json-object path)))
 
-(defn model->json-ld [model context-doc frame-doc]
+(defn model->json-ld [model frame-doc]
   (-> model
       model->json-array
       JsonDocument/of
-      (frame context-doc frame-doc)
-      JsonDocument/of
-      (compact context-doc)
+      (frame frame-doc)
       serialize-json-object))
 
 (comment
@@ -73,8 +66,7 @@
         frame-path
           "file:///Users/tristan/data/genegraph-neo/jsonld/library-frame.jsonld"]
       (-> (RDFDataMgr/loadModel ttl-uri Lang/TURTLE)
-          (model->json-ld  (json-file->doc context-path)
-                           (json-file->doc frame-path))
+          (model->json-ld (json-file->doc frame-path))
           json/read-str))
 
 
