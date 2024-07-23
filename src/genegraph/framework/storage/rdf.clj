@@ -74,7 +74,10 @@
               (.begin db ReadWrite/WRITE)
               (RDFDataMgr/read db is Lang/NQUADS)
               (.commit db)
-              (finally (.end db)))))
+              (catch Exception e
+                (.abort db))
+              (finally
+                (.end db)))))
         (p/system-update this {:state :failed-restoring-snapshot
                                :msg "Snapshot does not exist"}))))
 

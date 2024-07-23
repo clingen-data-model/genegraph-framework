@@ -3,8 +3,7 @@
   on events"
   (:require [clojure.data.json :as json]
             [clojure.edn :as edn]
-            [genegraph.framework.storage :as storage]
-            [next.jdbc :as jdbc]))
+            [genegraph.framework.storage :as storage]))
 
 (defmulti add-model ::format)
 
@@ -70,14 +69,3 @@
           ::publish
           conj
           publish-event))
-
-(defn execute [event instance command]
-  "add deferred execute effect to event"
-  (let [commit-promise (promise)]
-    (update event
-            ::effects
-            conj
-            {:command jdbc/execute!
-             :args [(get-in event [::storage/storage instance])
-                    command]
-             :commit-promise commit-promise})))

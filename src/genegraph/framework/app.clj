@@ -5,7 +5,6 @@
             [genegraph.framework.protocol :as p]
             [genegraph.framework.storage :as s]
             [genegraph.framework.storage.rocksdb]
-            [genegraph.framework.storage.jdbc]
             [genegraph.framework.storage.rdf :as rdf]
             [genegraph.framework.storage.gcs]
             [genegraph.framework.storage.atom]

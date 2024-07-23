@@ -2,13 +2,68 @@
   (:require [genegraph.framework.protocol :as p]
             [genegraph.framework.storage :as storage]
             [taoensso.nippy :as nippy]
-            [clojure.java.io :as io]
-            [digest])
-  (:import (org.rocksdb Options ReadOptions RocksDB Slice CompressionType Checkpoint)
+            [clojure.java.io :as io])
+  (:import (org.rocksdb Options ReadOptions RocksDB Slice CompressionType Checkpoint RocksIterator)
            java.util.Arrays
            java.nio.ByteBuffer
            java.nio.file.Path
-           [java.io ByteArrayOutputStream File]))
+           [java.io ByteArrayOutputStream File]
+           [java.nio ByteBuffer]
+           [net.openhft.hashing LongHashFunction]
+           [com.google.common.primitives Longs]))
+
+
+(defn k->long [k]
+  (if (instance? Long k)
+    k
+    (.hashBytes (LongHashFunction/xx3) (.getBytes (str k)))))
+
+(defn vec->key-bytes [x]
+  (println "vector")
+  (let [bs (ByteBuffer/allocate (* 8 (count x)))]
+    (run! #(.putLong bs (k->long %)) x)
+    (.toByteArray bs)))
+
+(def array-of-bytes-type (Class/forName "[B"))
+
+;; Keys fall into four categories:
+
+(defprotocol KeyBytes
+  (k->bytes [k]))
+
+;; 1) Raw byte array -- The assumption is that the specific
+;; key is desired, the byte array is simply passed through
+;; to RocksDB as a key.
+(extend array-of-bytes-type
+  KeyBytes
+  {:k->bytes identity})
+
+;; 2) String -- 64 bit hashed value is desired
+;; which can be incorporated into a sequence of key values
+(extend String
+  KeyBytes
+  {:k->bytes (fn [x]
+               (Longs/toByteArray (k->long x)))})
+
+;; 2) Long -- An ordered key is deisred
+;; for the purpose of range scans
+(extend Long
+  KeyBytes
+  {:k->bytes (fn [x]
+               (Longs/toByteArray x))})
+
+;; 3) Keyword -- Same as String
+(extend clojure.lang.Keyword
+  KeyBytes
+  {:k->bytes (fn [x] (k->bytes (str x)))})
+
+;; 4) Sequence -- append individual keys
+(extend clojure.lang.Sequential
+  KeyBytes
+  {:k->bytes (fn [x]
+               (let [bs (ByteBuffer/allocate (* 8 (count x)))]
+                 (run! #(.putLong bs (k->long %)) x)
+                 (.array bs)))})
 
 (defn open [path]
   (io/make-parents path)
@@ -78,32 +133,6 @@
           :state (atom :stopped)
           :instance (atom nil))))
 
-(def array-of-bytes-type (Class/forName "[B"))
-
-(defmulti key-to-byte-array class)
-
-(defmethod key-to-byte-array array-of-bytes-type [k] k)
-
-(defmethod key-to-byte-array java.lang.Long [k]
-  (-> (ByteBuffer/allocate (java.lang.Long/BYTES))
-      (.putLong k)
-      .array))
-
-(defmethod key-to-byte-array clojure.lang.PersistentVector [k]
-  (let [bs (ByteArrayOutputStream.)]
-    (run! #(.writeBytes bs %) (map key-to-byte-array k))
-    (.toByteArray bs)))
-
-(defmethod key-to-byte-array :default [k]
-  (-> k nippy/fast-freeze digest/md5 .getBytes))
-
-(comment
-  (key-to-byte-array 123456788)
-  (key-to-byte-array "this")
-  (key-to-byte-array {:an :object})
-  (key-to-byte-array [1 2 3])
-  )
-
 (defn prefix-range-end
   "Return the key defining the (exclusive) upper bound of a scan,
   as defined by RANGE-KEY"
@@ -112,42 +141,53 @@
     (doto (Arrays/copyOf range-key (alength range-key))
       (aset-byte last-byte-idx (inc (aget range-key last-byte-idx))))))
 
-(comment
-  (prefix-range-end (key-to-byte-array 3))
-  )
-
 (defn destroy [path]
   (with-open [opts (Options.)]
     (RocksDB/destroyDB path opts)))
 
-(defn range-get
-  "In order to limit the potential for memory leaks, this returns a
-  PersistentVector and handles all the lifecycle operations for the
-  required RocksDB entities."
-  ([db prefix]
-   (let [ba (key-to-byte-array prefix)]
-     (range-get db ba (prefix-range-end ba))))
-  ([db start end]
-   (with-open [slice (Slice. (key-to-byte-array end))
-               opts (.setIterateUpperBound (ReadOptions.) slice)
-               iter (.newIterator db opts)]
-     (.seek iter (key-to-byte-array start))
-     (loop [v (transient [])]
-       (if (.isValid iter)
-         (let [v1 (conj! v (nippy/fast-thaw (.value iter)))]
-           (.next iter)
-           (recur v1))
-         (persistent! v))))))
-
 (defn rocks-write! [^RocksDB db k v]
   (.put db
-        (key-to-byte-array k)
+        (k->bytes k)
         (nippy/fast-freeze v)))
 
 (defn rocks-get [db k]
-  (if-let [result (.get db (key-to-byte-array k))]
+  (if-let [result (.get db (k->bytes k))]
     (nippy/fast-thaw result)
     ::storage/miss))
+
+(deftype RocksRef [db k]
+  clojure.lang.IDeref
+  (clojure.lang.IDeref/deref [this]
+    (nippy/fast-thaw (.get db k))))
+
+(defn range-get
+  "Return range of records in RocksDB. May specify a fixed :start and :end,
+   or return all records beginning with :prefix. If :return-ref true, return
+  RocksRef objects instead of the records in "
+  [db {:keys [start end prefix return]}]
+  (let [start-key (k->bytes (or start prefix))]
+    (with-open [slice (Slice. (if end
+                                (k->bytes end)
+                                (prefix-range-end start-key)))
+                opts (.setIterateUpperBound (ReadOptions.) slice)
+                iter (.newIterator db opts)]
+      (.seek iter start-key)
+      (loop [v (transient [])]
+        (if (.isValid iter)
+          (let [v1 (conj! v
+                          (case return
+                            :key (.key iter)
+                            :ref (->RocksRef db (.key iter))
+                            (nippy/fast-thaw (.value iter))))]
+            (.next iter)
+            (recur v1))
+          (persistent! v))))))
+
+(defn scan
+  ([this prefix]
+   (range-get this {:prefix prefix}))
+  ([this start end]
+   (range-get this {:start start :end end})))
 
 (extend RocksDB
   
@@ -164,21 +204,21 @@
   {:read rocks-get}
 
   storage/IndexedDelete
-  {:delete (fn [this k] (.delete this (key-to-byte-array k)))}
+  {:delete (fn [this k] (.delete this (k->bytes k)))}
 
   storage/RangeRead
-  {:scan range-get}
+  {:scan scan}
 
   storage/RangeDelete
   {:range-delete
    (fn
      ([this prefix]
-      (let [kb (key-to-byte-array prefix)]
+      (let [kb (k->bytes prefix)]
         (.deleteRange this kb (prefix-range-end kb))))
      ([this start end]
       (.deleteRange this
-                    (key-to-byte-array start)
-                    (key-to-byte-array end))))}
+                    (k->bytes start)
+                    (k->bytes end))))}
 
   storage/TopicBackingStore
   {:store-offset
@@ -215,6 +255,12 @@
     (storage/write db [:one :three] :onethree)
     (storage/write db [:four :five] :fourfive)
     (storage/scan db :one))
+  
+  (with-open [db (open "/users/tristan/desktop/test-rocks")]
+    (storage/write db [:one :two] :onetwo)
+    (storage/write db [:one :three] :onethree)
+    (storage/write db [:four :five] :fourfive)
+    (mapv deref (range-get db {:prefix :one :return :ref})))
 
   (with-open [db (open "/users/tristan/desktop/test-rocks")]
     (storage/write db [:one :two] :onetwo)
