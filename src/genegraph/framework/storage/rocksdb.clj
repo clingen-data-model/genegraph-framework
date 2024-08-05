@@ -12,7 +12,6 @@
            [net.openhft.hashing LongHashFunction]
            [com.google.common.primitives Longs]))
 
-
 (defn k->long [k]
   (if (instance? Long k)
     k
@@ -137,9 +136,16 @@
   "Return the key defining the (exclusive) upper bound of a scan,
   as defined by RANGE-KEY"
   [^bytes range-key]
-  (let [last-byte-idx (dec (alength range-key))]
-    (doto (Arrays/copyOf range-key (alength range-key))
-      (aset-byte last-byte-idx (inc (aget range-key last-byte-idx))))))
+  (let [key-length (alength range-key)
+        key-prefix-idx (- key-length 8)
+        bb (ByteBuffer/allocate key-length)]
+    (.put bb range-key 0 key-prefix-idx)
+    (.put bb
+          (-> (Arrays/copyOfRange range-key key-prefix-idx key-length)
+              Longs/fromByteArray
+              inc
+              Longs/toByteArray))
+    (.array bb)))
 
 (defn destroy [path]
   (with-open [opts (Options.)]
@@ -255,7 +261,13 @@
     (storage/write db [:one :three] :onethree)
     (storage/write db [:four :five] :fourfive)
     (storage/scan db :one))
-  
+
+  (with-open [db (open "/users/tristan/desktop/test-rocks")]
+    (storage/write db [127 :two] :onetwo)
+    (storage/write db [127 :three] :onethree)
+    (storage/write db [4 :five] :fourfive)
+    (storage/scan db 127))
+
   (with-open [db (open "/users/tristan/desktop/test-rocks")]
     (storage/write db [:one :two] :onetwo)
     (storage/write db [:one :three] :onethree)
@@ -268,6 +280,10 @@
     (storage/write db [:four :five] :fourfive)
     (storage/range-delete db :one)
     (storage/scan db :one))
+
   )
+
+
+
 
 
