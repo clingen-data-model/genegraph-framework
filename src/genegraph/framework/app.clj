@@ -178,4 +178,4 @@
 
 
 (defmethod p/log-event :default [e]
-  (log/log (assoc (::event/data e) :level :info)))
+  e)

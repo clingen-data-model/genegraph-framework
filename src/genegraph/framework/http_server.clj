@@ -22,17 +22,19 @@
     [path http-method (p/as-interceptors processor) :route-name (:name processor)]))
 
 (defmethod p/init :http-server [server-def]
-  (-> server-def
-      (update ::http/routes
-              #(->> (:endpoints server-def)
-                    (map endpoint->route)
-                    (concat %)
-                    set
-                    route/expand-routes))
-      (assoc :state (atom {:status :stopped})
-             :producer (promise))
-      http/create-server
-      map->Server))
+  (let [init-fn (:init-fn server-def identity)]
+    (-> server-def
+        init-fn
+        (update ::http/routes
+                #(->> (:endpoints server-def)
+                      (map endpoint->route)
+                      (concat %)
+                      set
+                      route/expand-routes))
+        (assoc :state (atom {:status :stopped})
+               :producer (promise))
+        http/create-server
+        map->Server)))
 
 (comment
 

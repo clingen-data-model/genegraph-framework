@@ -6,14 +6,29 @@
             [genegraph.framework.kafka.admin :as kafka-admin]
             [io.pedestal.log :as log]
             [io.pedestal.interceptor :as interceptor]
-            [clojure.data.json :as json]))
+            [clojure.data.json :as json]
+            [portal.api :as portal]))
+
+;; Portal
+(comment
+  (def p (portal/open))
+  (add-tap #'portal/submit)
+  (portal/close)
+  (portal/clear)
+  )
 
 (def publish-interceptor
   (interceptor/interceptor
    {:name ::publish-interceptor
     :enter (fn [e]
              (log/info :fn :publish-interceptor)
-             (event/publish e (:payload e)))}))
+             (-> e 
+                 (event/publish  {::event/key "k1"
+                                  ::event/data {:d1 "hi"}
+                                  ::event/topic :test-out-1})
+                 (event/publish  {::event/key "k2"
+                                  ::event/data {:d2 "hi"}
+                                  ::event/topic :test-out-2})))}))
 
 (def cg-interceptor
   (interceptor/interceptor
@@ -69,13 +84,29 @@
              :kafka-consumer-group "testcg9"
              :kafka-cluster :ccloud
              :serialization :json
-             :kafka-topic "genegraph-test"}
+             :kafka-topic "genegraph-test"
+             :kafka-topic-config {}}
             :test-base
             {:name :test-base
              :type :kafka-reader-topic
              :kafka-cluster :ccloud
              :serialization :json
+             :kafka-topic-config {}
              :kafka-topic "genegraph-test-base"}
+            :test-out-1
+            {:name :test-base
+             :type :kafka-producer-topic
+             :kafka-cluster :ccloud
+             :serialization :json
+             :kafka-topic-config {}
+             :kafka-topic "genegraph-test-out-1"}
+            :test-out-2
+            {:name :test-base
+             :type :kafka-producer-topic
+             :kafka-cluster :ccloud
+             :serialization :json
+             :kafka-topic-config {}
+             :kafka-topic "genegraph-test-out-2"}
             :publish-to-test
             {:name :publish-to-test
              :type :simple-queue-topic}}
@@ -101,7 +132,7 @@
 
 (comment
   (def ccloud-example-app (p/init ccloud-example-app-def))
-  (kafka-admin/admin-actions-by-cluster ccloud-example-app)
+  (tap> (kafka-admin/admin-actions-by-cluster ccloud-example-app))
   (kafka-admin/configure-kafka-for-app! ccloud-example-app)
   (p/start ccloud-example-app)
   (p/stop ccloud-example-app)
