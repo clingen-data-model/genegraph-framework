@@ -35,8 +35,9 @@
      (do ~@body)
      (try
        (.begin ~db ReadWrite/READ)
-       (do ~@body
-           (.commit ~db)) ; https://github.com/apache/jena/issues/2584
+       (let [result# (do ~@body)]
+          (.commit ~db) ; https://github.com/apache/jena/issues/2584
+          result#)
        (finally (.end ~db)))))
 
 (defrecord RDFStore [instance
