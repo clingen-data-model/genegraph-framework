@@ -263,7 +263,7 @@
                (when-let [event (p/poll subscribed-topic)]
                  (process-event this event))
                (catch Exception e
-                 (clojure.stacktrace/print-stack-trace e)))))))
+                 (log/error :source ::start :record ::Processor)))))))
       (p/system-update this {:state :started})))
   
   (stop [this]
@@ -314,7 +314,7 @@
              (when-let [event (p/poll subscribed-topic)]
                (process-parallel-event this event))
              (catch Exception e
-               (clojure.stacktrace/print-stack-trace e))))))
+               (log/error :source ::start :record ::ParallelProcessor))))))
       (.start
        (Thread.
         #(while (p/running? this)
@@ -322,7 +322,7 @@
              (when-let [event @(.take effect-queue)]
                (process-event-effects! event))
              (catch Exception e
-               (clojure.stacktrace/print-stack-trace e))))))))
+               (log/error :source ::start :record ::ParallelProcessor))))))))
   
   (stop [this]
     (swap! state assoc :status :stopped)
