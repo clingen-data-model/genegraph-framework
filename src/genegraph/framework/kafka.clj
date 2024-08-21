@@ -114,7 +114,7 @@
                                   TimeUnit/MILLISECONDS)]
             (handle-event-status-updates topic event))
           (catch Exception e
-            (clojure.stacktrace/print-stack-trace e))))))))
+            (log/error :source ::start-status-queue-monitor))))))))
 
 (defn end-offset [consumer]
   ;; Per Kafka docs, end offset reported by the consumer is
