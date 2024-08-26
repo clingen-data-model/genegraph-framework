@@ -259,16 +259,17 @@
         (.start
          (Thread.
           #(while (= :running (:status @state))
-             (try 
-               (when-let [event (p/poll subscribed-topic)]
-                 (process-event this event))
-               (catch Exception e
-                 (log/error :source ::start
-                            :record ::Processor
-                            :name name
-                            :exception e)
-                 (reset! state :error)
-                 (p/system-update this {:state :error})))))))
+             (when-let [event (p/poll subscribed-topic)]
+               (try
+                 (process-event this event)
+                 (catch Exception e
+                   (log/error :source ::start
+                              :record ::Processor
+                              :name name
+                              :offset (::event/offset event)
+                              :exception e)
+                   #_(reset! state :error)
+                   #_(p/system-update this {:state :error}))))))))
       (p/system-update this {:state :started})))
   
   (stop [this]
