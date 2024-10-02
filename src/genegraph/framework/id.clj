@@ -38,13 +38,18 @@
 
 (defonce types (atom {}))
 
-
+(defn register-type
+  "Registers TYPE with the appropriate seq of
+  DEFINING-ATTRIBUTES. Order is significant;
+  attributes will be added to the byte buffer "
+  [type defining-attributes]
+  (swap! types assoc type defining-attributes))
 
 ;; relying on the vector of required attributes for a type
 ;; always being the third item in a type description.
 ;; should explore whether we can always rely on this
 (defn defining-attributes-for-type [t]
-  (nth (spec/describe t) 2))
+  (get @types t))
 
 (defn defining-attributes [o]
   (conj (mapv #(get o %) (defining-attributes-for-type (:type o)))
@@ -108,11 +113,11 @@
 
 (comment
 
-  (spec/def :ga4gh/SequenceLocation
-    (spec/keys :req [:ga4gh/sequenceReference :ga4gh/start :ga4gh/end]))
+  (register-type :ga4gh/SequenceLocation
+                 [:ga4gh/sequenceReference :ga4gh/start :ga4gh/end])
 
-  (spec/def :ga4gh/CopyNumberChange
-    (spec/keys :req [:ga4gh/location :ga4gh/copyChange]))
+  (register-type :ga4gh/CopyNumberChange
+                 [:ga4gh/location :ga4gh/copyChange])
   
   (names/add-prefixes {"ga4gh" "https://ga4gh.org/terms/"})
 
