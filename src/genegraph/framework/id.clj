@@ -36,8 +36,6 @@
 ;; Strings, Longs, and IRIs. IRIs are the format for
 ;; identifiers in the system.
 
-
-
 (defonce types (atom {}))
 
 (defn register-type
@@ -60,6 +58,11 @@
 
 (defprotocol HashablePrimitive
   (attr->hashable-primitive [attr]))
+
+(defn attr->hashable-primitive-capture-nil [attr]
+  (if (nil? attr)
+    "https://genegraph.clingen.app/nil"
+    (attr->hashable-primitive attr)))
 
 (defn hash-buffer-length [hashable-attrs]
   (reduce (fn [a attr]
@@ -84,7 +87,7 @@
 
 (defn iri [o]
   (->> (defining-attributes o)
-       (mapv attr->hashable-primitive)
+       (mapv attr->hashable-primitive-capture-nil)
        attrs->hash
        hash->id
        (str "https://genegraph.clingen.app/")))
@@ -104,7 +107,7 @@
 (extend-type clojure.lang.PersistentVector
   HashablePrimitive
   (attr->hashable-primitive [attr]
-    (attrs->hash (mapv attr->hashable-primitive attr))))
+    (attrs->hash (mapv attr->hashable-primitive-capture-nil attr))))
 
 (extend-type clojure.lang.IPersistentMap
   HashablePrimitive
@@ -135,6 +138,12 @@
         :ga4gh/start [100100 100110]
         :ga4gh/end [200102 200110]
         :type :ga4gh/SequenceLocation})
+  
+    (iri {:ga4gh/sequenceReference
+        "https://identifiers.org/refseq:NC_000001.10"
+          :ga4gh/start [100100 100110]
+          :ga4gh/end [200102 200110]
+          :type :ga4gh/SequenceLocation})
 
   (iri {:type :ga4gh/CopyNumberChange
         :ga4gh/copyChange :efo/copy-number-loss
@@ -143,6 +152,15 @@
          "https://identifiers.org/refseq:NC_000001.10"
          :ga4gh/start [100100 100110]
          :ga4gh/end [200102 200110]
+         :type :ga4gh/SequenceLocation}})
+
+  (iri {:type :ga4gh/CopyNumberChange
+        :ga4gh/copyChange :efo/copy-number-loss
+        :ga4gh/location
+        {:ga4gh/sequenceReference
+         "https://identifiers.org/refseq:NC_000001.10"
+         :ga4gh/start [nil 100110]
+         :ga4gh/end [200102 nil]
          :type :ga4gh/SequenceLocation}})
   
   (spec/valid? :w3c/iri 3)
