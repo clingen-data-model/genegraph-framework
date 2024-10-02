@@ -36,20 +36,23 @@
 ;; Strings, Longs, and IRIs. IRIs are the format for
 ;; identifiers in the system.
 
+
+
 (defonce types (atom {}))
 
 (defn register-type
-  "Registers TYPE with the appropriate seq of
-  DEFINING-ATTRIBUTES. Order is significant;
-  attributes will be added to the byte buffer "
-  [type defining-attributes]
-  (swap! types assoc type defining-attributes))
+  "Registers type with the appropriate seq of.
+  type-def is a map, required fields are :type, which is a keyword
+  translatable in names and :defining-attributes, a seq of defining 
+  attributes."
+  [type-def]
+  (swap! types assoc (:type type-def) type-def))
 
 ;; relying on the vector of required attributes for a type
 ;; always being the third item in a type description.
 ;; should explore whether we can always rely on this
 (defn defining-attributes-for-type [t]
-  (get @types t))
+  (get-in @types [t :defining-attributes]))
 
 (defn defining-attributes [o]
   (conj (mapv #(get o %) (defining-attributes-for-type (:type o)))
@@ -113,11 +116,13 @@
 
 (comment
 
-  (register-type :ga4gh/SequenceLocation
-                 [:ga4gh/sequenceReference :ga4gh/start :ga4gh/end])
+  (register-type {:type :ga4gh/SequenceLocation
+                  :defining-attributes
+                  [:ga4gh/sequenceReference :ga4gh/start :ga4gh/end]})
 
-  (register-type :ga4gh/CopyNumberChange
-                 [:ga4gh/location :ga4gh/copyChange])
+  (register-type {:type :ga4gh/CopyNumberChange
+                  :defining-attributes
+                  [:ga4gh/location :ga4gh/copyChange]})
   
   (names/add-prefixes {"ga4gh" "https://ga4gh.org/terms/"})
 
