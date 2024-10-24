@@ -7,12 +7,20 @@
   (:import [org.apache.jena.rdf.model Model Resource ModelFactory
             ResourceFactory Statement]
            [org.apache.jena.query ReadWrite Query QueryFactory
-            QueryExecutionFactory Dataset QuerySolutionMap]
+            QueryExecutionFactory Dataset QuerySolutionMap QuerySolution]
            [org.apache.jena.sparql.algebra OpAsQuery]))
 
 (defn- compose-select-result [qexec]
   (let [result (.execSelect qexec)]
     (mapv #(.getResource % (-> result .getResultVars first))
+          (iterator-seq result))))
+
+(defn- compose-select-table-result [qexec]
+  (let [result (.execSelect qexec)]
+    (mapv (fn [qs]
+            (reduce (fn [m v] (assoc m (keyword v) (.getResource qs v)))
+                    {}
+                    (.getResultVars result)))
           (iterator-seq result))))
 
 (defn- construct-query-solution-map [params]
@@ -48,6 +56,12 @@
       modified-query)
     query))
 
+(defn exec-select [qexec params]
+  (case (get-in params [:genegraph.framework.storage.rdf/params :type])
+    :count (-> qexec .execSelect iterator-seq count)
+    :table (compose-select-table-result qexec)
+    (compose-select-result qexec)))
+
 ;; TODO, there should be a version of select that can be executed
 ;; lazily.
 ;; The non-lazy version should have an upper-bound on results
@@ -57,9 +71,7 @@
     (with-open [qexec (QueryExecutionFactory/create query (types/model model) qs-map)]
       (cond
         (.isConstructType query) (.execConstruct qexec)
-        (.isSelectType query) (if (= :count (get-in params [:genegraph.framework.storage.rdf/params :type]))
-                                (-> qexec .execSelect iterator-seq count)
-                                (compose-select-result qexec))
+        (.isSelectType query) (exec-select qexec params)
         (.isAskType query) (.execAsk qexec)))))
 
 (deftype StoredQuery [query]
