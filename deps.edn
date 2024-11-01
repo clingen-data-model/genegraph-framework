@@ -32,7 +32,7 @@
   org.clojure/data.json                             {:mvn/version "2.5.0"}
 
   ;; Kafka
-  org.apache.kafka/kafka-clients                    {:mvn/version "3.7.1"}
+  org.apache.kafka/kafka-clients                    {:mvn/version "3.8.1"}
 
   ;; Compression for storage artifacts
   org.apache.commons/commons-compress               {:mvn/version "1.26.1"}
