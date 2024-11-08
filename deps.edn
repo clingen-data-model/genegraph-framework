@@ -22,9 +22,9 @@
  {org.clojure/clojure                               {:mvn/version "1.12.0"}
 
   ;; Interceptors and HTTP server
-  io.pedestal/pedestal.jetty                        {:mvn/version "0.7.0"}
-  io.pedestal/pedestal.route                        {:mvn/version "0.7.0"}
-  io.pedestal/pedestal.service                      {:mvn/version "0.7.0"}
+  io.pedestal/pedestal.jetty                        {:mvn/version "0.7.2"}
+  io.pedestal/pedestal.route                        {:mvn/version "0.7.2"}
+  io.pedestal/pedestal.service                      {:mvn/version "0.7.2"}
 
   ;; Serialization
   com.taoensso/nippy                                {:mvn/version "3.4.2"}
