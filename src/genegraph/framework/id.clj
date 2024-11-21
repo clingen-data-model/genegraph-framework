@@ -92,6 +92,11 @@
        hash->id
        (str "https://genegraph.clingen.app/")))
 
+(defn random-iri []
+  (str "https://genegraph.clingen.app/"
+       (hash->id (attrs->hash [(str (random-uuid))]))))
+
+
 (extend-type java.lang.String
   HashablePrimitive
   (attr->hashable-primitive [attr] attr))
