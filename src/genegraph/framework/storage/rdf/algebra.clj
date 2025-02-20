@@ -8,6 +8,8 @@
              [org.apache.jena.graph Node NodeFactory Triple Node_Variable Node_Blank]
              [org.apache.jena.sparql.algebra.op OpDistinct OpProject OpFilter OpBGP OpConditional OpDatasetNames OpDiff OpDisjunction OpDistinctReduced OpExtend OpGraph OpGroup OpJoin OpLabel OpLeftJoin OpList OpMinus OpNull OpOrder OpQuad OpQuadBlock OpQuadPattern OpReduced OpSequence OpSlice OpTopN OpUnion OpTable ]
              [org.apache.jena.sparql.core BasicPattern Var VarExprList QuadPattern Quad]
+             [org.apache.jena.sparql.expr ExprList E_NotExists E_Exists]
+             [java.util List]
              org.apache.jena.sparql.core.Prologue
              java.io.ByteArrayOutputStream))
 
@@ -40,6 +42,7 @@
     (Triple/create subject predicate object)))
 
 (declare op)
+(declare expr)
 
 (defn- op-union [a1 a2 & amore]
   (OpUnion. 
@@ -54,7 +57,9 @@
   (case op-name
     :distinct (OpDistinct/create (op a1))
     :project (OpProject. (op a2) (var-seq a1))
-    ;; :filter (OpFilter/filterBy (ExprList. ^List (map expr (butlast args))) (op (last args)))
+    :filter (OpFilter/filterBy
+             (ExprList. (mapv expr (butlast args)))
+             (op (last args)))
     :bgp (OpBGP. (BasicPattern/wrap (map triple args)))
     :conditional (OpConditional. (op a1) (op a2))
     :diff (OpDiff/create (op a1) (op a2))
@@ -77,3 +82,10 @@
     :union (apply op-union args)
     (throw (ex-info (str "Unknown operation " op-name) {:op-name op-name
                                                         :args args}))))
+
+(defn expr
+  [[f a1]]
+  (tap> [f a1])
+  (case f
+    :not-exists (E_NotExists. (op a1))
+    :exists (E_Exists. (op a1))))

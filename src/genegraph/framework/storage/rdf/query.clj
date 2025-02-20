@@ -69,6 +69,7 @@
   (let [qs-map (construct-query-solution-map params)
         query (construct-query-with-params query-def params)]
     (with-open [qexec (QueryExecutionFactory/create query (types/model model) qs-map)]
+      (tap> (.getContext qexec))
       (cond
         (.isConstructType query) (.execConstruct qexec)
         (.isSelectType query) (exec-select qexec params)
