@@ -7,7 +7,8 @@
   (:import [org.apache.jena.rdf.model Model Resource ModelFactory
             ResourceFactory Statement]
            [org.apache.jena.query ReadWrite Query QueryFactory
-            QueryExecutionFactory Dataset QuerySolutionMap QuerySolution]
+            QueryExecutionFactory Dataset QuerySolutionMap QuerySolution
+            QueryExecutionDatasetBuilder QueryExecution]
            [org.apache.jena.sparql.algebra OpAsQuery]))
 
 (defn- compose-select-result [qexec]
@@ -62,14 +63,15 @@
     :table (compose-select-table-result qexec)
     (compose-select-result qexec)))
 
-;; TODO, there should be a version of select that can be executed
-;; lazily.
-;; The non-lazy version should have an upper-bound on results
-(defn- exec [query-def model params]
-  (let [qs-map (construct-query-solution-map params)
-        query (construct-query-with-params query-def params)]
-    (with-open [qexec (QueryExecutionFactory/create query (types/model model) qs-map)]
-      (tap> (.getContext qexec))
+(defn build-query-execution [query model params]
+  (-> (QueryExecution/model (types/model model))
+      (.query query)
+      (.substitution (construct-query-solution-map params))
+      .build))
+
+(defn exec [query-def model params]
+  (let [query (construct-query-with-params query-def params)]
+    (with-open [qexec (build-query-execution query model params)]
       (cond
         (.isConstructType query) (.execConstruct qexec)
         (.isSelectType query) (exec-select qexec params)
