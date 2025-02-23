@@ -40,8 +40,10 @@ select ?x ?type where {
               [:bgp
                ['type :rdfs/subClassOf :example/type1]]]
              [:not-exists
-              [:bgp
-               ['type :rdf/subClassOf :example/type3]]]
+              [:filter
+               [:in 'types :rdf/type1 :rdf/type2]
+               [:bgp
+                ['type :rdf/subClassOf 'types]]]]
              [:bgp
               ['x :rdf/type 'type]
               ['type :rdfs/subClassOf :example/type2]]]])]
@@ -77,6 +79,43 @@ filter exists {
       Algebra/compile
       str
       println)
+
+  (-> (QueryFactory/create
+"
+PREFIX dc:   <http://purl.org/dc/elements/1.1/> 
+PREFIX :     <http://example.org/book/> 
+PREFIX ns:   <http://example.org/ns#> 
+
+SELECT ?book ?title ?price
+{
+   VALUES ?book { :book1 :book3 }
+   ?book dc:title ?title ;
+         ns:price ?price .
+}
+"
+)
+      Algebra/compile
+      str
+      println)
+
+    (-> (QueryFactory/create
+"
+PREFIX dc:   <http://purl.org/dc/elements/1.1/> 
+
+SELECT ?person ?name WHERE {
+  ?person dc:title ?name .
+  FILTER EXISTS {
+  ?person a ?c .
+  FILTER (?person IN (<http://example.org/person1>, <http://example.org/person2>))
+  }
+}
+"
+)
+      Algebra/compile
+      str
+      println)
+
+  
   )
 
 "filter not exists {

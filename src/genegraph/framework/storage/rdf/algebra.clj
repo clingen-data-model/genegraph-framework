@@ -8,13 +8,31 @@
              [org.apache.jena.graph Node NodeFactory Triple Node_Variable Node_Blank]
              [org.apache.jena.sparql.algebra.op OpDistinct OpProject OpFilter OpBGP OpConditional OpDatasetNames OpDiff OpDisjunction OpDistinctReduced OpExtend OpGraph OpGroup OpJoin OpLabel OpLeftJoin OpList OpMinus OpNull OpOrder OpQuad OpQuadBlock OpQuadPattern OpReduced OpSequence OpSlice OpTopN OpUnion OpTable ]
              [org.apache.jena.sparql.core BasicPattern Var VarExprList QuadPattern Quad]
-             [org.apache.jena.sparql.expr ExprList E_NotExists E_Exists]
+             [org.apache.jena.sparql.expr Expr NodeValue ExprVar ExprList
+              E_NotExists E_Exists E_OneOf E_NotOneOf]
              [java.util List]
              org.apache.jena.sparql.core.Prologue
              java.io.ByteArrayOutputStream))
 
 (defn- var-seq [vars]
   (map #(Var/alloc (str %)) vars))
+
+(defn ->expr
+  "Attempts to coerce the given object into an expr for use in
+  OneOf style expressions"
+  [s]
+  (cond
+    (symbol? s) (-> s
+                    str
+                    Var/alloc
+                    ExprVar.)
+    (keyword? s) (-> s
+                     names/kw->iri
+                     NodeFactory/createURI
+                     NodeValue/makeNode)
+    (string? s) (-> s
+                    NodeFactory/createURI
+                    NodeValue/makeNode)))
 
 (defn triple
   "Construct triple for use in BGP. Part of query algebra."
@@ -84,8 +102,10 @@
                                                         :args args}))))
 
 (defn expr
-  [[f a1]]
+  [[f & [a1 & amore :as args]]]
   (tap> [f a1])
   (case f
     :not-exists (E_NotExists. (op a1))
-    :exists (E_Exists. (op a1))))
+    :exists (E_Exists. (op a1))
+    :in (E_OneOf. (->expr a1) (ExprList. (mapv ->expr amore)))
+    :not-in (E_NotOneOf. (->expr a1) (ExprList. (mapv ->expr amore)))))
