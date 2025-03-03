@@ -32,10 +32,9 @@
                      NodeFactory/createURI
                      NodeValue/makeNode)
     (string? s) (NodeValue/makeString s)
-    #_(-> s
-          NodeFactory/createURI
-          NodeValue/makeNode)
-    ))
+    (integer? s) (NodeValue/makeInteger s)
+    (double? s) (NodeValue/makeDouble s)
+    (float? s) (NodeValue/makeFloat s)))
 
 (defn triple
   "Construct triple for use in BGP. Part of query algebra."
@@ -116,3 +115,4 @@
     := (E_Equals. (->expr a1) (->expr (first amore)))
     :> (E_GreaterThan. (->expr a1) (->expr (first amore)))
     :>= (E_GreaterThanOrEqual. (->expr a1) (->expr (first amore)))))
+
