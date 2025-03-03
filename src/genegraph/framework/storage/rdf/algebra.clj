@@ -9,7 +9,8 @@
              [org.apache.jena.sparql.algebra.op OpDistinct OpProject OpFilter OpBGP OpConditional OpDatasetNames OpDiff OpDisjunction OpDistinctReduced OpExtend OpGraph OpGroup OpJoin OpLabel OpLeftJoin OpList OpMinus OpNull OpOrder OpQuad OpQuadBlock OpQuadPattern OpReduced OpSequence OpSlice OpTopN OpUnion OpTable ]
              [org.apache.jena.sparql.core BasicPattern Var VarExprList QuadPattern Quad]
              [org.apache.jena.sparql.expr Expr NodeValue ExprVar ExprList
-              E_NotExists E_Exists E_OneOf E_NotOneOf]
+              E_NotExists E_Exists E_OneOf E_NotOneOf E_GreaterThan E_GreaterThanOrEqual E_Equals
+              E_LessThan E_LessThanOrEqual]
              [java.util List]
              org.apache.jena.sparql.core.Prologue
              java.io.ByteArrayOutputStream))
@@ -30,9 +31,11 @@
                      names/kw->iri
                      NodeFactory/createURI
                      NodeValue/makeNode)
-    (string? s) (-> s
-                    NodeFactory/createURI
-                    NodeValue/makeNode)))
+    (string? s) (NodeValue/makeString s)
+    #_(-> s
+          NodeFactory/createURI
+          NodeValue/makeNode)
+    ))
 
 (defn triple
   "Construct triple for use in BGP. Part of query algebra."
@@ -103,9 +106,13 @@
 
 (defn expr
   [[f & [a1 & amore :as args]]]
-  (tap> [f a1])
   (case f
     :not-exists (E_NotExists. (op a1))
     :exists (E_Exists. (op a1))
     :in (E_OneOf. (->expr a1) (ExprList. (mapv ->expr amore)))
-    :not-in (E_NotOneOf. (->expr a1) (ExprList. (mapv ->expr amore)))))
+    :not-in (E_NotOneOf. (->expr a1) (ExprList. (mapv ->expr amore)))
+    :< (E_LessThan. (->expr a1) (->expr (first amore)))
+    :<= (E_LessThanOrEqual. (->expr a1) (->expr (first amore)))
+    := (E_Equals. (->expr a1) (->expr (first amore)))
+    :> (E_GreaterThan. (->expr a1) (->expr (first amore)))
+    :>= (E_GreaterThanOrEqual. (->expr a1) (->expr (first amore)))))
