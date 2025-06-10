@@ -9,8 +9,7 @@
            [org.apache.jena.rdf.model Model Resource ResourceFactory
             ModelFactory]
            [java.util.concurrent BlockingQueue ArrayBlockingQueue TimeUnit]
-           [java.util List ArrayList]
-           [org.apache.jena.query.text TextDatasetFactory]))
+           [java.util List ArrayList]))
 
 (def most-recent-offset
   (ResourceFactory/createProperty "http://genegraph/mostRecentOffset"))
@@ -226,8 +225,6 @@
              defaults
              storage-def
              {:dataset (cond
-                         (:assembly-path storage-def)
-                         (TextDatasetFactory/create (:assembly-path storage-def))
                          (:path storage-def)
                          (TDB2Factory/connectDataset (:path storage-def))
                          :else (TDB2Factory/createDataset))
