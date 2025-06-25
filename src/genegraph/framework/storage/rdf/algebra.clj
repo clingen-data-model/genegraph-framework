@@ -6,7 +6,7 @@
               QueryExecutionFactory QuerySolutionMap]
              [org.apache.jena.sparql.algebra AlgebraGenerator Algebra OpAsQuery Op]
              [org.apache.jena.graph Node NodeFactory Triple Node_Variable Node_Blank]
-             [org.apache.jena.sparql.algebra.op OpDistinct OpProject OpFilter OpBGP OpConditional OpDatasetNames OpDiff OpDisjunction OpDistinctReduced OpExtend OpGraph OpGroup OpJoin OpLabel OpLeftJoin OpList OpMinus OpNull OpOrder OpQuad OpQuadBlock OpQuadPattern OpReduced OpSequence OpSlice OpTopN OpUnion OpTable ]
+             [org.apache.jena.sparql.algebra.op OpDistinct OpProject OpFilter OpBGP OpConditional OpDatasetNames OpDisjunction OpDistinctReduced OpExtend OpGraph OpGroup OpJoin OpLabel OpLeftJoin OpList OpMinus OpNull OpOrder OpQuad OpQuadBlock OpQuadPattern OpReduced OpSequence OpSlice OpTopN OpUnion OpTable ]
              [org.apache.jena.sparql.core BasicPattern Var VarExprList QuadPattern Quad]
              [org.apache.jena.sparql.expr Expr NodeValue ExprVar ExprList
               E_NotExists E_Exists E_OneOf E_NotOneOf E_GreaterThan E_GreaterThanOrEqual E_Equals
@@ -82,7 +82,7 @@
              (op (last args)))
     :bgp (OpBGP. (BasicPattern/wrap (map triple args)))
     :conditional (OpConditional. (op a1) (op a2))
-    :diff (OpDiff/create (op a1) (op a2))
+    ;; :diff (OpDiff/create (op a1) (op a2))
     :disjunction (OpDisjunction/create (op a1) (op a2))
     ;; :extend (OpExtend/create (op a2) (var-expr-list a1))
     ;; :group (OpGroup/create (op (first amore))
