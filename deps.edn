@@ -41,7 +41,7 @@
   ;; Datastores
   
   ;; Rocks 
-  org.rocksdb/rocksdbjni                            {:mvn/version "9.4.0"}
+  org.rocksdb/rocksdbjni                            {:mvn/version "10.2.1"}
   
   ;; Jena 
   org.apache.jena/jena-arq                          {:mvn/version "5.4.0"
