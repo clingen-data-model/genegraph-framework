@@ -61,7 +61,7 @@
 
 (defn attr->hashable-primitive-capture-nil [attr]
   (if (nil? attr)
-    "https://genegraph.clingen.app/nil"
+    "https://genegraph.clinicalgenome.org/r/nil"
     (attr->hashable-primitive attr)))
 
 (defn hash-buffer-length [hashable-attrs]
@@ -90,10 +90,10 @@
        (mapv attr->hashable-primitive-capture-nil)
        attrs->hash
        hash->id
-       (str "https://genegraph.clingen.app/")))
+       (str "https://genegraph.clinicalgenome.org/r/")))
 
 (defn random-iri []
-  (str "https://genegraph.clingen.app/"
+  (str "https://genegraph.clinicalgenome.org/r/"
        (hash->id (attrs->hash [(str (random-uuid))]))))
 
 
