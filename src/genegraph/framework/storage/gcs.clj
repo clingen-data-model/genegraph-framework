@@ -186,6 +186,10 @@
   storage/HandleExists
   (storage/exists? [this]
     (< 0 (.getSize this)))
+
+  storage/HandleOps
+  (storage/delete-handle [this]
+    (.delete this (make-array Blob$BlobSourceOption 0)))
   
   io/IOFactory
   (io/make-input-stream [this opts]

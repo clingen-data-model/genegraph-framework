@@ -98,6 +98,10 @@
     (p/system-update rocksdb-def {:state :restoring-snapshot})
     (storage/restore-archive path snapshot-handle)))
 
+(defn destroy [path]
+  (with-open [opts (Options.)]
+    (RocksDB/destroyDB path opts)))
+
 (defrecord RocksDBInstance [name
                             type
                             path
@@ -124,6 +128,13 @@
     (.close @instance)
     this)
 
+  p/Resetable
+  (reset [this]
+    (when-let [opts (:reset-opts this)]
+      (when (and (:destroy-snapshot opts) (:snapshot-handle this))
+        (-> this :snapshot-handle storage/as-handle storage/delete-handle))
+      (destroy path)))
+
   )
 
 (defmethod p/init :rocksdb [db-def]
@@ -147,9 +158,7 @@
               Longs/toByteArray))
     (.array bb)))
 
-(defn destroy [path]
-  (with-open [opts (Options.)]
-    (RocksDB/destroyDB path opts)))
+
 
 (defn rocks-write! [^RocksDB db k v]
   (.put db

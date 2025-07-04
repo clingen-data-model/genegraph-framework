@@ -2,6 +2,7 @@
   (:require [genegraph.framework.protocol :as p]
             [genegraph.framework.event :as event]
             [genegraph.framework.event.store :as event-store]
+            [genegraph.framework.kafka.admin :as kafka-admin]
             [io.pedestal.log :as log])
   (:import [org.apache.kafka.clients.admin Admin NewTopic CreateTopicsResult OffsetSpec]
            [org.apache.kafka.clients.producer Producer KafkaProducer ProducerRecord]
@@ -369,6 +370,24 @@
     (stop [this]
       (perform-common-shutdown-actions! this))
 
+    p/Resetable
+    (reset [this]
+      (when-let [opts (:reset-opts this)]
+        (if (:clear-topic opts)
+          (with-open [admin (kafka-admin/create-admin-client kafka-cluster)]
+            (kafka-admin/reset-topic admin kafka-topic))
+          (let [^KafkaConsumer new-consumer (create-kafka-consumer this)]
+            (.subscribe new-consumer [kafka-topic])
+            (while (not (seq (.assignment new-consumer)))
+              (.poll new-consumer (Duration/ofMillis 100)))
+            (.seekToBeginning new-consumer (.assignment new-consumer))
+            (run! #(println "position "
+                            (.position new-consumer %))
+                  (.assignment new-consumer))
+            (.commitSync new-consumer)
+            (.unsubscribe new-consumer)
+            (log/info :fn :reset :msg "Successfully reset" :topic name)))))
+
     p/Consumer
     (poll [this]
       (poll this))
@@ -400,6 +419,11 @@
     (when-let [p (:kafka-producer @state)]
       (.close p))
     (swap! state assoc :status :stopped))
+
+  ;; Does nothing, but may consider using this to destroy the output of a
+  ;; producer
+  p/Resetable
+  (reset [this])
 
   p/Publisher
   (publish [this event]
@@ -444,6 +468,13 @@
             (.unsubscribe consumer)
             (swap! state assoc :status :stopped))
           (catch Exception e (p/exception this e)))))))
+
+  ;; Currently does nothing. May want to create an option to reset
+  ;; local state store (when not destroying it at the same time
+  ;; during a reset
+  p/Resetable
+  (reset [this]
+    )
   
   (stop [this]
     (perform-common-shutdown-actions! this))

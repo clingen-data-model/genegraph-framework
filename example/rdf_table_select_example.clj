@@ -20,7 +20,9 @@
 (def example-model
   (rdf/statements->model
    [[:example/test1 :rdf/type :example/type1]
-    [:example/type1 :rdfs/subClassOf :example/type2]]))
+    [:example/type1 :rdfs/subClassOf :example/type2]
+    [:example/test1 :rdfs/label "test1"]]
+   ))
 
 
 
@@ -58,6 +60,22 @@ select ?x ?type where {
               ['type :rdfs/subClassOf :example/type2]]
              [:bgp
               ['type :rdf/subClassOf :example/type3]]]])]
+    (println (str q))
+    (q example-model #_{::rdf/params {:type :table}}))
+
+    (let [q (rdf/create-query
+           [:project ['x]
+            [:filter
+             [:> 'label "a"]
+             [:bgp
+              ['x :rdfs/label 'label]]]])]
+    (println (str q))
+    (q example-model #_{::rdf/params {:type :table}}))
+
+        (let [q (rdf/create-query
+           [:project ['x]
+            [:bgp
+             ['x :rdfs/label 'label]]])]
     (println (str q))
     (q example-model #_{::rdf/params {:type :table}}))
 

@@ -50,6 +50,9 @@
 (defprotocol HandleExists
   (exists? [this]))
 
+(defprotocol HandleOps
+  (delete-handle [this]))
+
 (defmulti as-handle :type)
 
 (defmethod as-handle :file [def]
@@ -57,7 +60,10 @@
 
 (extend-type File
   HandleExists
-  (exists? [this] (.exists this)))
+  (exists? [this] (.exists this))
+
+  HandleOps
+  (delete-handle [this] (.delete this)))
 
 (defn ->input-stream [source]
   (cond (map? source) (io/input-stream (as-handle source))

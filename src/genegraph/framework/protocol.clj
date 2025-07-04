@@ -10,6 +10,16 @@
   (start [this])
   (stop [this]))
 
+(defprotocol Resetable
+  "Reset the given resource to its initial state. Behavior can be modified with passed options.
+
+  For topics, will reset offsets, but not destroy data stored in Kafka by default. Will reset offsets for consumer-group backed topics. Setting {:recreate-kafka-topic true} in opts will delete and recreate the Kafka topic, the cluster will preserve the permissions on the existing topic.
+
+  For storage interfaces, will destroy all locally stored data. Setting {:destroy-snapshot true} in opts will also attempt to delete the upstream snapshot backing the data.
+
+  Assumes the entity has not been started, but has been initialized."
+  (reset [this]))
+
 (defprotocol Consumer
   "For topics allowing consumption of records"
   (poll [this] "Returns a value, or nil if poll request times out."))

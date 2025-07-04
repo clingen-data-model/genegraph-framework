@@ -4,7 +4,7 @@
             [clojure.set :as set]
             [io.pedestal.log :as log])
   (:import [org.apache.kafka.clients.admin
-            Admin NewTopic CreateTopicsResult OffsetSpec]
+            Admin NewTopic CreateTopicsResult OffsetSpec AlterConfigOp AlterConfigOp$OpType AdminClientConfig ConfigEntry]
            [org.apache.kafka.common KafkaFuture]
            [org.apache.kafka.common.config
             ConfigResource ConfigResource$Type]
@@ -21,6 +21,26 @@
   {"retention.ms" "-1" ; retain indefinitely by default
    "max.message.bytes" "8388608"} ; maximum allowable by confluent cloud
   )
+
+(defn set-topic-retention!
+  "Set retention time for a topic using the AdminClient"
+  [admin-client topic-name retention-ms]
+  (let [resource (ConfigResource. ConfigResource$Type/TOPIC topic-name)
+        retention-config (ConfigEntry. "retention.ms" retention-ms)
+        alter-op (AlterConfigOp. retention-config AlterConfigOp$OpType/SET)
+        configs {resource [alter-op]}]
+    (-> admin-client
+        (.incrementalAlterConfigs configs)
+        .all
+        deref)
+    (println (format "Set retention.ms=%s for topic: %s" retention-ms topic-name))))
+
+(defn reset-topic
+  "Assumes a topic with infinite retention time--time limited topics should not generally need to be reset."
+  [admin-client topic-name]
+  (set-topic-retention! admin-client topic-name "100")
+  (Thread/sleep (* 1000 30))
+  (set-topic-retention! admin-client topic-name "-1"))
 
 (defn create-admin-client [cluster-def]
   (Admin/create (:common-config cluster-def)))
@@ -322,7 +342,8 @@
   (configure-kafka-for-app! test-app-def-2)
 
   (with-open [admin (create-admin-client dx-ccloud-dev)]
-    (delete-topic admin "genegraph-test"))
+    (reset-topic admin "genegraph-test")
+    #_(set-topic-retention! admin "genegraph-test" "-1"))
   
   )
 

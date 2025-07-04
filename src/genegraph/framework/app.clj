@@ -33,6 +33,14 @@
 
 (defrecord App [topics storage processors http-servers]
 
+  ;; Reset all components in app, according to their
+  ;; reset options
+  p/Resetable
+  (reset [this]
+    (->> (concat (vals topics) (vals storage))
+         (filter #(satisfies? p/Resetable %))
+         (run! p/reset)))
+  
   p/Lifecycle
   (start [this]
     (p/start (select-system-processor processors))

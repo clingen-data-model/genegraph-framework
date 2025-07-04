@@ -28,7 +28,10 @@
                                   ::event/topic :test-out-1})
                  (event/publish  {::event/key "k2"
                                   ::event/data {:d2 "hi"}
-                                  ::event/topic :test-out-2})))}))
+                                  ::event/topic :test-out-2})
+                 (event/publish  {::event/key "k2"
+                                  ::event/data {:d2 "hi"}
+                                  ::event/topic :test-topic})))}))
 
 (def cg-interceptor
   (interceptor/interceptor
@@ -74,9 +77,19 @@
              {:type :rocksdb
               :name :test-rocksdb
               :path "/Users/tristan/data/genegraph-neo/test-rocks"
-              :snapshot-handle {:type :file
-                                :base "/Users/tristan/data/genegraph-neo"
-                                :path "test-rocks-snapshot.tar.lz4"}
+              :snapshot-handle
+              {:type :file
+               :base "/Users/tristan/data/genegraph-neo"
+               :path "test-rocks-snapshot.tar.lz4"}
+              :load-snapshot true}
+             :test-jena
+             {:type :rdf
+              :name :test-jena
+              :path "/Users/tristan/data/genegraph-neo/test-jena"
+              :snapshot-handle
+              {:type :file
+               :base "/Users/tristan/data/genegraph-neo"
+               :path "test-jena-snapshot.nq.gz"}
               :load-snapshot true}}
    :topics {:test-topic
             {:name :test-topic
@@ -85,7 +98,8 @@
              :kafka-cluster :ccloud
              :serialization :json
              :kafka-topic "genegraph-test"
-             :kafka-topic-config {}}
+             :kafka-topic-config {}
+             :reset-opts {}}
             :test-base
             {:name :test-base
              :type :kafka-reader-topic
@@ -137,8 +151,16 @@
   (p/start ccloud-example-app)
   (p/stop ccloud-example-app)
 
-  (storage/store-snapshot (get-in ccloud-example-app-def [:storage :test-rocksdb]))
-  (storage/restore-snapshot (get-in ccloud-example-app-def [:storage :test-rocksdb]))
+  (storage/store-snapshot (get-in ccloud-example-app [:storage :test-rocksdb]))
+  (storage/restore-snapshot (get-in ccloud-example-app [:storage :test-rocksdb]))
+
+  (let [a (p/init ccloud-example-app-def)]
+    (p/reset a))
+  
+  (p/reset (get-in ccloud-example-app [:storage :test-rocksdb]) {:destroy-snapshot true})
+  (p/reset (get-in ccloud-example-app [:storage :test-jena]) {:destroy-snapshot true})
+
+  (get-in ccloud-example-app [:storage :test-rocksdb])
 
   (p/publish (get-in ccloud-example-app [:topics :publish-to-test])
              {::event/key "k2"
@@ -147,7 +169,7 @@
                         ::event/key "k4"
                         ::event/data {:d :d}}})
 
-  (p/publish (get-in ccloud-example-app [:topics :publish-to-test])
+  (p/publish (get-in ccloud-example-app [:topics :test-topic])
              {::event/key "k2"
               ::event/data {:b :b}
               :payload {::event/topic :test-topic
@@ -159,10 +181,22 @@
       :test-rocksdb
       :instance
       deref
-      (storage/read "k3"))
+      (storage/read "k4"))
 
   (-> ccloud-example-app
       :topics
       :test-topic
       genegraph.framework.kafka/topic-up-to-date?)
+
+  (-> {:type :file
+       :base "/Users/tristan/data/genegraph-neo"
+       :path "test-rocks-snapshot.tar.lz4"}
+      storage/as-handle
+      storage/delete-handle)
+
+  (-> {:type :gcs
+       :bucket "genegraph-framework-dev"
+       :path "test-rocks-snapshot.tar.lz4"}
+      storage/as-handle
+      storage/delete-handle)
   )

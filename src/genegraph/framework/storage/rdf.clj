@@ -8,6 +8,7 @@
             [genegraph.framework.storage.rdf.query :as query]
             [genegraph.framework.storage :as s]
             [genegraph.framework.event :as event]
+            [genegraph.framework.storage :as storage]
             [clojure.string :as string]
             [clojure.java.io :as io]
             [io.pedestal.log :as log])
@@ -19,7 +20,8 @@
             QuerySolutionMap]
            [org.apache.jena.sparql.algebra OpAsQuery]
            [org.apache.jena.riot RDFDataMgr Lang]
-           [java.util.zip GZIPInputStream]))
+           [java.util.zip GZIPInputStream]
+           [org.apache.commons.io FileUtils]))
 
 (def instance-defaults
   {:queue-size 100})
@@ -83,6 +85,14 @@
         (p/system-update this {:state :failed-restoring-snapshot
                                :msg "Snapshot does not exist"}))))
 
+
+  p/Resetable
+  (reset [this]
+    (when-let [opts (:reset-opts this)]
+      (when (and (:destroy-snapshot opts) (:snapshot-handle this))
+        (-> this :snapshot-handle storage/as-handle storage/delete-handle))
+      (FileUtils/deleteDirectory (io/file path))))
+  
   p/Lifecycle
   (start [this]
     (p/system-update this {:state :starting})
