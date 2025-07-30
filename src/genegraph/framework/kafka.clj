@@ -423,7 +423,10 @@
   ;; Does nothing, but may consider using this to destroy the output of a
   ;; producer
   p/Resetable
-  (reset [this])
+  (reset [this]
+    (when (get-in this [:reset-opts :clear-topic])
+      (with-open [admin (kafka-admin/create-admin-client kafka-cluster)]
+        (kafka-admin/reset-topic admin kafka-topic))))
 
   p/Publisher
   (publish [this event]
