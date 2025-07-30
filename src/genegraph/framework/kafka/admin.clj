@@ -38,9 +38,11 @@
 (defn reset-topic
   "Assumes a topic with infinite retention time--time limited topics should not generally need to be reset."
   [admin-client topic-name]
+  (log/info :fn ::reset-topic :msg "Resetting" :topic topic-name)
   (set-topic-retention! admin-client topic-name "100")
   (Thread/sleep (* 1000 30))
-  (set-topic-retention! admin-client topic-name "-1"))
+  (set-topic-retention! admin-client topic-name "-1")
+  (log/info :fn ::reset-topic :msg "Reset complete" :topic topic-name))
 
 (defn create-admin-client [cluster-def]
   (Admin/create (:common-config cluster-def)))
