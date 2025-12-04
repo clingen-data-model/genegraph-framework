@@ -1,6 +1,6 @@
 (ns genegraph.framework.storage.rdf.jsonld
   (:require [clojure.java.io :as io]
-            [clojure.data.json :as json])
+            [charred.api :as json])
   (:import [org.apache.jena.riot.system JenaTitanium]
            [org.apache.jena.riot RDFDataMgr Lang]
            [org.apache.jena.rdf.model Model Statement ModelFactory]

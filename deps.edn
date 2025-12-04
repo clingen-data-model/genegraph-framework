@@ -1,4 +1,4 @@
-{:mvn/repos 
+{#_#_:mvn/repos 
  {"central"
   {:url "https://repo1.maven.org/maven2/"}
   "clojars"
@@ -16,27 +16,35 @@
          :main-opts ["-m" "cognitect.test-runner"]
          :exec-fn cognitect.test-runner.api/test}
   :dev {:extra-deps {djblue/portal {:mvn/version "0.57.0"}
-                     org.slf4j/slf4j-simple {:mvn/version "2.0.7"}}}}
+                     org.slf4j/slf4j-simple {:mvn/version "2.0.7"}}
+        :jvm-opts ["-XX:+UseZGC"
+                   "-XX:MaxRAMPercentage=50"
+                   "-Djdk.attach.allowAttachSelf"
+                   "--add-modules=jdk.incubator.vector"
+                   "--enable-native-access=ALL-UNNAMED"]}}
 
  :deps
- {org.clojure/clojure                               {:mvn/version "1.12.0"}
+ {org.clojure/clojure                               {:mvn/version "1.12.3"}
 
   ;; Interceptors and HTTP server
-  io.pedestal/pedestal.jetty                        {:mvn/version "0.7.2"}
-  io.pedestal/pedestal.route                        {:mvn/version "0.7.2"}
-  io.pedestal/pedestal.service                      {:mvn/version "0.7.2"}
+  io.pedestal/pedestal.jetty                        {:mvn/version "0.8.1"}
+  io.pedestal/pedestal.route                        {:mvn/version "0.8.1"}
+  io.pedestal/pedestal.service                      {:mvn/version "0.8.1"}
 
   ;; Serialization
-  com.taoensso/nippy                                {:mvn/version "3.4.2"}
-  net.openhft/zero-allocation-hashing               {:mvn/version "0.26ea0"}
-  org.clojure/data.json                             {:mvn/version "2.5.0"}
+  com.taoensso/nippy                                {:mvn/version "3.6.0"}
+  net.openhft/zero-allocation-hashing               {:mvn/version "0.27ea1"}
+  com.cnuernber/charred                             {:mvn/version "1.037"}
+
+  #_#_org.clojure/data.json                             {:mvn/version "2.5.0"}
 
   ;; Kafka
-  org.apache.kafka/kafka-clients                    {:mvn/version "4.0.0"}
+  org.apache.kafka/kafka-clients                    {:mvn/version "4.1.1"}
 
   ;; Compression for storage artifacts
-  org.apache.commons/commons-compress               {:mvn/version "1.26.1"}
-  org.lz4/lz4-java                                  {:mvn/version "1.8.0"}
+  org.apache.commons/commons-compress               {:mvn/version "1.28.0"}
+  ;; package is discontinued; investigate removing
+  ;; at.yawk.lz4/lz4-java                              {:mvn/version "1.8.1"}
 
   ;; Datastores
   
@@ -44,29 +52,30 @@
   org.rocksdb/rocksdbjni                            {:mvn/version "10.2.1"}
   
   ;; Jena 
-  org.apache.jena/jena-arq                          {:mvn/version "5.4.0"
+  org.apache.jena/jena-arq                          {:mvn/version "5.6.0"
                                                      :exclusions
                                                      [com.google.protobuf/protobuf-java]}
-  org.apache.jena/jena-core                         {:mvn/version "5.4.0"
+  org.apache.jena/jena-core                         {:mvn/version "5.6.0"
                                                      :exclusions
                                                      [com.google.protobuf/protobuf-java]}
-  org.apache.jena/jena-iri                          {:mvn/version "5.4.0"
+  org.apache.jena/jena-iri                          {:mvn/version "5.6.0"
                                                      :exclusions
                                                      [com.google.protobuf/protobuf-java]}
-  org.apache.jena/jena-tdb2                         {:mvn/version "5.4.0"
+  org.apache.jena/jena-tdb2                         {:mvn/version "5.6.0"
                                                      :exclusions
                                                      [com.google.protobuf/protobuf-java]}
   #_#_org.apache.jena/jena-text                         {:mvn/version "5.3.0"
                                                      :exclusions
                                                      [com.google.protobuf/protobuf-java]}
-  org.apache.jena/jena-shacl                        {:mvn/version "5.4.0"
+  org.apache.jena/jena-shacl                        {:mvn/version "5.6.0"
                                                      :exclusions
                                                      [com.google.protobuf/protobuf-java]}
 
   ;; Google Cloud Storage
   
-  com.google.cloud/google-cloud-secretmanager       {:mvn/version "2.66.0"}
-  com.google.cloud/google-cloud-storage             {:mvn/version "2.53.1"}
+  com.google.cloud/google-cloud-secretmanager       {:mvn/version "2.80.0"}
+  ;; Look into updating google-cloud-storage
+  com.google.cloud/google-cloud-storage             {:mvn/version "2.60.0"}
 
 }}
 

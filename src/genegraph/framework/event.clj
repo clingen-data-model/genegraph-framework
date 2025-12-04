@@ -1,7 +1,7 @@
 (ns genegraph.framework.event
   "Protocols, multimethods, and a common namespace for operations
   on events"
-  (:require [clojure.data.json :as json]
+  (:require [charred.api :as json]
             [clojure.edn :as edn]
             [genegraph.framework.storage :as storage]))
 
@@ -16,7 +16,7 @@
   event)
 
 (defmethod deserialize :json [event]
-  (assoc event ::data (json/read-str (::value event) :key-fn keyword)))
+  (assoc event ::data (json/read-json (::value event) :key-fn keyword)))
 
 (defmethod deserialize :edn [event]
   (assoc event ::data (edn/read-string (::value event))))
@@ -25,7 +25,7 @@
   (assoc event ::value (::data event)))
 
 (defmethod serialize :json [event]
-  (assoc event ::value (json/write-str (::data event))))
+  (assoc event ::value (json/write-json-str (::data event))))
 
 (defmethod serialize :edn [event]
   (assoc event ::value (pr-str (::data event))))

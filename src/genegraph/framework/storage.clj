@@ -9,11 +9,9 @@
             TarArchiveEntry TarArchiveOutputStream TarArchiveInputStream]
            [org.apache.commons.compress.archivers ArchiveEntry]
            [org.apache.commons.compress.compressors.lz4
-            BlockLZ4CompressorOutputStream BlockLZ4CompressorInputStream]
+            BlockLZ4CompressorOutputStream BlockLZ4CompressorInputStream FramedLZ4CompressorInputStream FramedLZ4CompressorOutputStream]
            [org.apache.commons.compress.compressors.gzip
             GzipCompressorOutputStream GzipCompressorInputStream]
-           [net.jpountz.lz4
-            LZ4FrameInputStream LZ4FrameOutputStream LZ4Factory]
            [java.time Instant])
   (:refer-clojure :exclude [read]))
 
@@ -79,7 +77,7 @@
                        as-handle
                        io/output-stream
                        BufferedOutputStream.
-                       LZ4FrameOutputStream.
+                       FramedLZ4CompressorOutputStream.
                        TarArchiveOutputStream.)]
       (run! (fn [f]
               (.putArchiveEntry
@@ -107,7 +105,7 @@
                        as-handle
                        io/input-stream
                        BufferedInputStream.
-                       LZ4FrameInputStream.
+                       FramedLZ4CompressorInputStream.
                        TarArchiveInputStream.)]
       (loop [entry (.getNextEntry is)]
         (when entry
