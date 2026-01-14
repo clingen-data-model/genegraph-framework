@@ -17,3 +17,5 @@ When a Genegraph app is stopped, we need to make sure that the transactional ids
 ### Kafka robustness
 
 Should report errors and automatically attempt to restart consumers and producers that have hit an error state. Optionally consider flagging the instance for deletion/reinitialization by kubernetes as a last resort.
+
+Related are kafka architecture improvements. Whether topics should own Kafka Consumers is up for debate (am leaning towards yes), but having Kafka Producer code in the Processor is not great. I also want to be able to batch transactional commits; the need for a transaction commit per message is a major drag on processing speed.

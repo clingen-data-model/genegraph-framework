@@ -133,6 +133,9 @@
           (catch Exception e
             (log/error :source ::start-status-queue-monitor))))))))
 
+;; TODO crashes if called prior to assignments on consumer
+
+
 (defn end-offset [consumer]
   ;; Per Kafka docs, end offset reported by the consumer is
   ;; always the next offset *past* the last record in the
@@ -324,11 +327,13 @@
 (defn consumer-rebalance-listener [topic]
   (reify ConsumerRebalanceListener
     (onPartitionsAssigned [_ partitions]
-      (println "consumer rebalance offsets " (last-committed-offset topic))
-      (deliver (:end-offset-at-start @(:state topic))
-               (end-offset (:kafka-consumer @(:state topic))))
-      (deliver (:initial-consumer-group-offset @(:state topic))
-               (last-committed-offset topic)))
+      (println "partitions assigned " (:name topic))
+      (when (seq partitions)
+        (println "consumer rebalance offsets " (last-committed-offset topic))
+        (deliver (:end-offset-at-start @(:state topic))
+                 (end-offset (:kafka-consumer @(:state topic))))
+        (deliver (:initial-consumer-group-offset @(:state topic))
+                 (last-committed-offset topic))))
     (onPartitionsLost [_ partitions] [])
     (onPartitionsRevoked [_ partitions] [])))
 
