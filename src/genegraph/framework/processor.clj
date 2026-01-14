@@ -15,19 +15,35 @@
 ;; Kafka specific stuff
 ;; This probably gets refactored as soon as another message broker is supported
 
+;; TODO UnifiedExceptionHandling
+
 (defn commit-kafka-transaction! [event]
   (when-let [^Producer p (::event/producer event)]
-    (.commitTransaction p))
+    (try 
+      (.commitTransaction p)
+      (catch Exception e
+        (log/warn :fn :commit-kafka-transaction!
+                  :exception (str (type e))
+                  :exception-class :kafka))))
   event)
+
+
+;; TODO UnifiedExceptionHandling
 
 (defn add-offset-to-tx! [{::event/keys [producer consumer-group offset kafka-topic]
                           :as event}]
   (when (and producer consumer-group offset kafka-topic)
-    (.sendOffsetsToTransaction
-     producer
-     {(TopicPartition. kafka-topic 0)
-      (OffsetAndMetadata. (+ 1 offset))} ; use next offset, per kafka docs
-     (ConsumerGroupMetadata. consumer-group)))
+    (try
+      (.sendOffsetsToTransaction
+       producer
+       {(TopicPartition. kafka-topic 0)
+        (OffsetAndMetadata. (+ 1 offset))} ; use next offset, per kafka docs
+       (ConsumerGroupMetadata. consumer-group))
+      (catch Exception e
+        (log/warn :fn ::add-offset-to-tx!
+                  :exception (str (type e))
+                  :exception-class :kafka)
+        (throw e))))
   event)
 
 (defn open-kafka-transaction! [event]

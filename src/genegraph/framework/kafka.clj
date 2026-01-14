@@ -3,9 +3,11 @@
             [genegraph.framework.event :as event]
             [genegraph.framework.event.store :as event-store]
             [genegraph.framework.kafka.admin :as kafka-admin]
-            [io.pedestal.log :as log])
+            [io.pedestal.log :as log]
+            [clojure.string :as str])
   (:import [org.apache.kafka.clients.admin Admin NewTopic CreateTopicsResult OffsetSpec]
-           [org.apache.kafka.clients.producer Producer KafkaProducer ProducerRecord]
+           [org.apache.kafka.clients.producer Producer KafkaProducer ProducerRecord
+            Callback]
            [org.apache.kafka.clients.consumer Consumer KafkaConsumer ConsumerGroupMetadata
             OffsetAndMetadata ConsumerRebalanceListener]
            [org.apache.kafka.common KafkaFuture TopicPartition]
@@ -41,6 +43,19 @@
    ::event/completion-promise (promise)
    ::event/execution-thread (promise)})
 
+
+;; TODO UnifiedExceptionHandling
+
+;; Should pass more info along and leverage the system topic interface.
+;; but this is a start.
+(def producer-callback
+  (reify org.apache.kafka.clients.producer.Callback
+    (onCompletion [this metadata exception]
+      (when exception
+        (log/warn :fn :onCompletion
+                  :exception-class :kafka
+                  :exception (str (type exception)))))))
+
 (defn publish [topic event]
   (.send
    (or (::event/producer event) (:kafka-producer @(:state topic)))
@@ -48,7 +63,8 @@
        (assoc ::event/kafka-topic (:kafka-topic topic)
               ::event/format (:serialization topic))
        event/serialize
-       event->producer-record)))
+       event->producer-record)
+   producer-callback))
 
 (defn poll
   "Poll event queue for events (already pulled from Kafka)."
@@ -126,6 +142,9 @@
   ;; but they do...
   (-> (.endOffsets consumer (.assignment consumer)) first val (- 2)))
 
+
+;; TODO UnifiedExceptionHandling
+
 (defn poll-kafka-consumer
   "default method to poll a Kafka consumer for new records.
   returns vector of events converted to Clojure data. Optionally
@@ -133,10 +152,19 @@
   ([consumer]
    (poll-kafka-consumer consumer {}))
   ([consumer m]
-   (->> (.poll consumer (Duration/ofMillis 100))
-        .iterator
-        iterator-seq
-        (mapv #(-> % consumer-record->event (merge m))))))
+   (try
+     (->> (.poll consumer (Duration/ofMillis 100))
+          .iterator
+          iterator-seq
+          (mapv #(-> % consumer-record->event (merge m))))
+     (catch Exception e
+       (log/warn :fn ::poll-kafka-consumer
+                 :exception (str (type e))
+                 :exception-class :kafka
+                 :subscription (str/join
+                                ", "
+                                (.subscription consumer)))
+       (throw e)))))
 
 (defn initial-state []
   {:delivered-up-to-date-event? false
@@ -292,6 +320,7 @@
             .offset)))
 
 ;; TODO clean shutdown of Kafka
+;; TODO UnifiedExceptionHandling
 (defn consumer-rebalance-listener [topic]
   (reify ConsumerRebalanceListener
     (onPartitionsAssigned [_ partitions]
