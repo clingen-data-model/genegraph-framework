@@ -10,7 +10,7 @@
   (:import [org.apache.kafka.clients.producer Producer]
            [org.apache.kafka.common TopicPartition]
            [org.apache.kafka.clients.consumer ConsumerGroupMetadata OffsetAndMetadata]
-           [java.util.concurrent ArrayBlockingQueue BlockingQueue TimeUnit]))
+           [java.util.concurrent ArrayBlockingQueue BlockingQueue TimeUnit Semaphore]))
 
 ;; Kafka specific stuff
 ;; This probably gets refactored as soon as another message broker is supported
@@ -301,12 +301,45 @@
 (defn process-parallel-event [processor event]
   (.put (:effect-queue processor)
         (future
-          (-> (add-app-state event processor)
-              event/deserialize
+          (-> event
               (interceptor-chain/enqueue (:interceptors processor))
               interceptor-chain/execute))))
 
+(defn get-or-create-gate [state event k]
+  (if-let [gate (get (:gates @state) k)]
+    gate
+    (let [new-gate (Semaphore. 1 true)]
+      (swap! state assoc-in :gates k new-gate)
+      new-gate)))
 
+(defn await-prior-event [{:keys [gate-fn state parallel-gate-timeout] :as processor} event]
+  #_(tap> processor)
+  (let [k (gate-fn (::event/data event))
+        gate (get (:gates @state) k)
+        timeout (or parallel-gate-timeout 30)]
+    (when (= :timeout (and gate (deref gate (* timeout 1000) :timeout)))
+      (log/error :fn :process-gated-parallel-event
+                 :error :timeout-exceeded
+                 :key k
+                 :timeout timeout)
+      (throw (ex-info "Timeout waiting for event gate"
+                      {:key k
+                       :cause :timeout-exceeded})))))
+
+(defn process-gated-parallel-event [{:keys [gate-fn state parallel-gate-timeout] :as processor} event]
+  (let [k (gate-fn (::event/data event))
+        gate (get (:gates @state) k)
+        timeout (or parallel-gate-timeout 30)]
+    (await-prior-event processor event)
+    (swap! state assoc-in [:gates k] (::event/completion-promise event))
+    (process-parallel-event processor event)))
+
+(defn deserialize-parallel-event [processor event]
+  (.put (:deserialized-event-queue processor)
+        (future
+          (-> (add-app-state event processor)
+              event/deserialize
+              (update ::event/completion-promise #(or % (promise)))))))
 
 (defrecord ParallelProcessor [name
                               subscribe
@@ -316,7 +349,9 @@
                               interceptors
                               kafka-cluster
                               backing-store
+                              deserialized-event-queue
                               effect-queue
+                              gate-fn
                               init-fn]
 
   p/EventProcessor
@@ -334,15 +369,36 @@
         #(while (p/running? this)
            (try 
              (when-let [event (p/poll subscribed-topic)]
-               (process-parallel-event this event))
+               (deserialize-parallel-event this event))
              (catch Exception e
-               (log/error :source ::start :record ::ParallelProcessor))))))
+               (clojure.stacktrace/print-stack-trace e)
+               (log/error :source ::start
+                          :fn ::deserialize-parallel-event
+                          :record ::ParallelProcessor
+                          :exception e))))))
       (.start
        (Thread.
         #(while (p/running? this)
            (try 
-             (when-let [event @(.take effect-queue)]
-               (process-event-effects! event))
+             (when-let [event-future (.poll deserialized-event-queue
+                                            500
+                                            TimeUnit/MILLISECONDS)]
+               (if gate-fn
+                 (process-gated-parallel-event this @event-future)
+                 (process-parallel-event this @event-future)))
+             (catch Exception e
+               (clojure.stacktrace/print-stack-trace e)
+               (log/error :source ::start
+                          :record ::ParallelProcessor
+                          :exception e))))))
+      (.start
+       (Thread.
+        #(while (p/running? this)
+           (try 
+             (when-let [event-future (.poll effect-queue
+                                             500
+                                             TimeUnit/MILLISECONDS)]
+               (process-event-effects! @event-future))
              (catch Exception e
                (log/error :source ::start :record ::ParallelProcessor))))))))
   
@@ -356,5 +412,6 @@
 (defmethod p/init :parallel-processor [processor-def]
   (-> processor-def
       processor-init
-      (assoc :effect-queue (ArrayBlockingQueue. 100))
+      (assoc :effect-queue (ArrayBlockingQueue. 30))
+      (assoc :deserialized-event-queue (ArrayBlockingQueue. 30))
       map->ParallelProcessor))
