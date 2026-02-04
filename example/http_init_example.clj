@@ -3,9 +3,28 @@
             [genegraph.framework.protocol :as p]
             [genegraph.framework.event :as event]
             [io.pedestal.interceptor :as interceptor]
-            [io.pedestal.http :as http]
+            #_[io.pedestal.http :as http]
             [io.pedestal.log :as log]))
 
+
+
+
+(def print-event-interceptor
+  (interceptor/interceptor
+   {:name :print-system-event
+    :enter (fn [e]
+             (log/info :system-event :recieved)
+             e)}))
+
+(def hello-interceptor
+  (interceptor/interceptor
+   {:name :hello-interceptor
+    :enter (fn [e] (assoc e :response {:status 200 :body "hello!"}))}))
+
+(def hello-processor
+  {:name :hello-processor
+   :type :processor
+   :interceptors [hello-interceptor]})
 
 (def ready-server
   {:ready-server
@@ -14,27 +33,17 @@
     :init-fn (fn [svr]
                (log/info :ready-server :init)
                svr)
-    ::http/host "0.0.0.0"
-    ::http/allowed-origins {:allowed-origins (constantly true)
-                            :creds true}
-    ::http/routes
+    :endpoints [{:path "/hello"
+                 :processor :hello-processor
+                 :method :get}]
+    :routes
     [["/ready"
       :get (fn [_] {:status 200 :body "server is ready"})
       :route-name ::readiness]
      ["/live"
       :get (fn [_] {:status 200 :body "server is live"})
       :route-name ::liveness]]
-    ::http/type :jetty
-    ::http/port 8888
-    ::http/join? false
-    ::http/secure-headers nil}})
-
-(def print-event-interceptor
-  (interceptor/interceptor
-   {:name :print-system-event
-    :enter (fn [e]
-             (log/info :system-event :recieved)
-             e)}))
+    :port 8888}})
 
 (def publish-system-event-interceptor
   (interceptor/interceptor
@@ -46,7 +55,6 @@
                ::event/key :d
                ::event/data {:g :g}}))}))
 
-
 (def ready-app-def
   {:type :genegraph-app
    :http-servers ready-server
@@ -54,7 +62,8 @@
    {:events-topic {:type :simple-queue-topic
                    :name :events-topic}}
    :processors
-   {:event-processor
+   {:hello-processor hello-processor
+    :event-processor
     {:type :processor
      :name :event-processor
      :subscribe :events-topic

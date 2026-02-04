@@ -41,7 +41,6 @@
        (ConsumerGroupMetadata. consumer-group))
       (catch Exception e
         (log/warn :fn ::add-offset-to-tx!
-                  :exception (str (type e))
                   :exception-class :kafka)
         (throw e))))
   event)

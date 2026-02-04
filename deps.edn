@@ -26,10 +26,7 @@
  :deps
  {org.clojure/clojure                               {:mvn/version "1.12.3"}
 
-  ;; Interceptors and HTTP server
-  io.pedestal/pedestal.jetty                        {:mvn/version "0.8.1"}
-  io.pedestal/pedestal.route                        {:mvn/version "0.8.1"}
-  io.pedestal/pedestal.service                      {:mvn/version "0.8.1"}
+  io.pedestal/pedestal.http-kit                     {:mvn/version "0.8.1"}
 
   ;; Serialization
   com.taoensso/nippy                                {:mvn/version "3.6.0"}
