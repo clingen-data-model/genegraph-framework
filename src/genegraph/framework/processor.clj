@@ -384,10 +384,8 @@
                  (process-gated-parallel-event this @event-future)
                  (process-parallel-event this @event-future)))
              (catch Exception e
-               (clojure.stacktrace/print-stack-trace e)
                (log/error :source ::start
-                          :record ::ParallelProcessor
-                          :exception e))))))
+                          :record ::ParallelProcessor))))))
       (.start
        (Thread.
         #(while (p/running? this)
