@@ -143,7 +143,10 @@
   ;; so decrement by two.
   ;; Unclear why Kafka offsets now increment by twos rather than ones,
   ;; but they do...
-  (-> (.endOffsets consumer (.assignment consumer)) first val (- 2)))
+  (some-> (.endOffsets consumer (.assignment consumer))
+          first
+          val
+          (- 2)))
 
 
 ;; TODO UnifiedExceptionHandling
@@ -183,10 +186,6 @@
           :kafka-options {"enable.auto.commit" false
                           "auto.offset.reset" "earliest"
                           "isolation.level" "read_committed"}
-
-          ;; :initial-local-offset (promise)
-          ;; :end-offset-at-start (promise)
-          ;; :initial-consumer-group-offset (promise)
           :state (atom (initial-state))}
          topic-def))
 
@@ -327,15 +326,25 @@
 (defn consumer-rebalance-listener [topic]
   (reify ConsumerRebalanceListener
     (onPartitionsAssigned [_ partitions]
-      (println "partitions assigned " (:name topic))
+      (log/info :fn :onPartitionsAssigned
+                :topic (:name topic)
+                :action :partitions-assigned)
       (when (seq partitions)
-        (println "consumer rebalance offsets " (last-committed-offset topic))
-        (deliver (:end-offset-at-start @(:state topic))
-                 (end-offset (:kafka-consumer @(:state topic))))
-        (deliver (:initial-consumer-group-offset @(:state topic))
-                 (last-committed-offset topic))))
-    (onPartitionsLost [_ partitions] [])
-    (onPartitionsRevoked [_ partitions] [])))
+        (let [lco (last-committed-offset topic)
+              eo (end-offset (:kafka-consumer @(:state topic)))]
+          (log/info :fn :onPartitionsAssigned
+                    :topic (:name topic)
+                    :last-commited-offset lco
+                    :end-offset eo
+                    :partition-count (count partitions))
+          (deliver (:end-offset-at-start @(:state topic)) eo)
+          (deliver (:initial-consumer-group-offset @(:state topic)) lco))))
+    (onPartitionsLost [_ partitions]
+      (log/info :fn :onPartitionsLost :topic (:name topic))
+      [])
+    (onPartitionsRevoked [_ partitions]
+      (log/info :fn :onParitionsRevoked :topic (:name topic))
+      [])))
 
 (defn init-producer! [{:keys [kafka-cluster state]}]
   (let [producer (create-producer kafka-cluster
