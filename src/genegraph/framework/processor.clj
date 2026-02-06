@@ -370,11 +370,9 @@
              (when-let [event (p/poll subscribed-topic)]
                (deserialize-parallel-event this event))
              (catch Exception e
-               (clojure.stacktrace/print-stack-trace e)
                (log/error :source ::start
                           :fn ::deserialize-parallel-event
-                          :record ::ParallelProcessor
-                          :exception e))))))
+                          :record ::ParallelProcessor))))))
       (.start
        (Thread.
         #(while (p/running? this)
