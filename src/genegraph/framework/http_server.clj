@@ -2,7 +2,11 @@
   (:require [genegraph.framework.protocol :as p]
             [io.pedestal.connector :as conn]
             [io.pedestal.http.http-kit :as hk]
-            [io.pedestal.service.interceptors :as service-interceptors]))
+            [io.pedestal.service.interceptors :as service-interceptors]
+            [io.pedestal.http.ring-middlewares :as ring-interceptors]
+            [io.pedestal.http.route :as route-interceptors]
+            [io.pedestal.http.body-params :as body-interceptors]
+            [io.pedestal.http.secure-headers :as security-interceptors]))
 
 (defrecord Server [type
                    name
@@ -28,9 +32,18 @@
    :initial-context {},
    :join? false})
 
+(def base-interceptors
+  [service-interceptors/log-request
+   service-interceptors/not-found
+   #_ring-interceptors/content-type
+   #_route-interceptors/query-params
+   #_body-interceptors/body-params])
+
 (defn create-connector [server-def]
   (-> default-connector-map
-      conn/with-default-interceptors
+      #_(assoc :interceptors base-interceptors)
+      (conn/with-interceptors base-interceptors)
+      #_(conn/with-default-interceptors)
       (merge (select-keys server-def
                           [:port :host :interceptors]))
       (conn/with-routes (->> (:endpoints server-def)
@@ -46,15 +59,7 @@
       map->Server))
 
 
-
-
-
-
-
-
-
-
-
-
-
-
+#_(map :name
+     (-> default-connector-map
+         conn/with-default-interceptors
+         :interceptors))
