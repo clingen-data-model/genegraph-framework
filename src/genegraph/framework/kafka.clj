@@ -14,7 +14,7 @@
            [java.time Duration]
            [java.util.concurrent BlockingQueue ArrayBlockingQueue LinkedBlockingQueue TimeUnit]))
 
-(defn create-producer [cluster-def opts]
+(defn create-producer! [cluster-def opts]
   (let [merged-opts (merge (:common-config cluster-def)
                            (:producer-config cluster-def)
                            opts)
@@ -46,25 +46,14 @@
 
 ;; TODO UnifiedExceptionHandling
 
-;; Should pass more info along and leverage the system topic interface.
-;; but this is a start.
-(def producer-callback
-  (reify org.apache.kafka.clients.producer.Callback
-    (onCompletion [this metadata exception]
-      (when exception
-        (log/warn :fn :onCompletion
-                  :exception-class :kafka
-                  :exception (str (type exception)))))))
+
 
 (defn publish [topic event]
-  (.send
+  (p/publish
    (or (::event/producer event) (:kafka-producer @(:state topic)))
-   (-> event
-       (assoc ::event/kafka-topic (:kafka-topic topic)
-              ::event/format (:serialization topic))
-       event/serialize
-       event->producer-record)
-   producer-callback))
+   (assoc event
+          ::event/kafka-topic (:kafka-topic topic)
+          ::event/format (:serialization topic))))
 
 (defn poll
   "Poll event queue for events (already pulled from Kafka)."
@@ -346,10 +335,15 @@
       (log/info :fn :onParitionsRevoked :topic (:name topic))
       [])))
 
-(defn init-producer! [{:keys [kafka-cluster state]}]
-  (let [producer (create-producer kafka-cluster
-                                  {"max.request.size" (int (* 1024 1024 10))})]
-    (swap! state assoc :kafka-producer producer)))
+(defn init-producer! [opts]
+  (when (:kafka-cluster opts)
+    (let [producer (p/init (-> opts
+                               (select-keys [:kafka-cluster
+                                             :kafka-transactional-id
+                                             :kafka-consumer-group])
+                               (assoc :type :genegraph-kafka-producer)))]
+      (p/start producer)
+      (swap! (:state opts) assoc :kafka-producer producer))))
 
 (defn perform-common-startup-actions! [{:keys [state] :as topic}]
   (reset! state (initial-state))
@@ -359,13 +353,14 @@
   (Thread/startVirtualThread #(deliver-up-to-date-event-if-needed topic))
   (start-status-queue-monitor topic))
 
-(defn perform-common-shutdown-actions! [{:keys [state]}]
-  (swap! state assoc :status :stopping)
+(defn stop-producer! [{:keys [state]}]
   (when-let [p (:kafka-producer @state)]
-    (.close p))
+    (p/stop p)))
+
+(defn perform-common-shutdown-actions! [{:keys [state] :as topic}]
+  (swap! state assoc :status :stopping)
+  (stop-producer! topic)
   (swap! state assoc :status :stopped))
-
-
 
 (defrecord KafkaConsumerGroupTopic
     [name
@@ -395,6 +390,7 @@
               (.subscribe new-consumer
                           [kafka-topic]
                           (consumer-rebalance-listener this))
+              ;; is the following idomatic Clojure?
               (loop [events (update-local-storage! this)]
                 (run! #(deliver-event
                         this
@@ -438,7 +434,7 @@
     p/Publisher
     (publish [this event]
       (publish this event))
-  
+
     p/Offsets
     (set-offset! [this offset] (deliver (:initial-local-offset @state) offset)))
 
@@ -458,10 +454,7 @@
     (when (:create-producer this)
       (init-producer! this)))
   (stop [this]
-    (swap! state assoc :status :stopping)
-    (when-let [p (:kafka-producer @state)]
-      (.close p))
-    (swap! state assoc :status :stopped))
+    (perform-common-shutdown-actions! this))
 
   ;; Does nothing, but may consider using this to destroy the output of a
   ;; producer
@@ -473,7 +466,9 @@
 
   p/Publisher
   (publish [this event]
-    (publish this event)))
+    (publish this event))
+
+  )
 
 (derive KafkaProducerTopic :genegraph/topic)
 
@@ -530,7 +525,7 @@
 
   p/Publisher
   (publish [this event] (publish this event))
-  
+
   p/Offsets
   (set-offset! [this offset]
     (deliver (:initial-local-offset @state) offset)))
@@ -562,6 +557,215 @@
   @(:state t)
   (p/stop t)
   )
+
+(defn transactional-producer? [producer]
+  (:kafka-transactional-id producer))
+
+(defn running? [{:keys [state]}]
+  (let [status (:status @state)]
+    (get #{:running :degraded} status)))
+
+(defn report-producer-error [producer error]
+  (log/error
+    :fn :report-producer-error
+    :error (:error error)
+    :severity (:severity error)
+    :message (:message error)))
+
+(defn should-execute-commit? [{:keys [state queue] :as producer}]
+  (and (transactional-producer? producer)
+       (or (= 0 (.size queue))
+           (< 100 (count (:uncommitted-records @state))))))
+
+;; Start here, look at structure of
+;; update offset to understand this
+;; new-offsets is a map with the form
+;; {[consumer-group kafka-topic] offset}
+;; intended to hold the latest offset read for a given consumer-group, topic pair
+
+(defn send-offsets! [{:keys [state] :as genegraph-kafka-producer}]
+  (try
+    (let [{:keys [producer new-offsets]} @state]
+      (run!
+       (fn [[[consumer-group kafka-topic] offset]]
+         (.sendOffsetsToTransaction
+          producer
+          {(TopicPartition. kafka-topic 0)
+           (OffsetAndMetadata. (+ 1 offset))} ; use next offset, per kafka docs
+          (ConsumerGroupMetadata. consumer-group)))
+       new-offsets))
+    (catch Exception e
+      (report-producer-error genegraph-kafka-producer
+                             {:error :exception-sending-offsets
+                              :severity :critical
+                              :message (.getMessage e)}))))
+
+(defn commit-transaction-if-needed!
+  "Commit the transaction if there are no more events to publish,
+  or if the maximum number of events to publish betwen transactions has been exceeded."
+  [{:keys [state] :as producer}]
+  (log/info :fn :commit-transaction-if-needed
+            :action :enter)
+  (when (should-execute-commit? producer)
+    (log/info :fn :commit-transaction-if-needed
+              :action :executing-commit)
+    (try
+      (send-offsets! producer)
+      (.commitTransaction (:producer @state))
+      (swap! state
+             assoc
+             :uncommitted-records []
+             :transaction-status :committed-transaction)
+      (catch Exception e
+        (report-producer-error producer
+                               {:error :commit-exception
+                                :severity :critical
+                                :message (.getMessage e)})))))
+
+(defn deliver-commit-promise [event value]
+  (when-let [p (:commit-promise event)]
+    (deliver p value)))
+
+;; Should pass more info along and leverage the system topic interface.
+;; but this is a start.
+(defn producer-callback [genegraph-producer event]
+  (reify org.apache.kafka.clients.producer.Callback
+    (onCompletion [this metadata exception]
+      (if exception
+        (do (report-producer-error genegraph-producer
+                                   {:error :error-producing-record
+                                    :severity :critical
+                                    :message (.getMessage exception)})
+            (deliver-commit-promise event false))
+        (deliver-commit-promise event true)))))
+
+(defn start-transaction-if-needed! [{:keys [state] :as producer}]
+  (log/info :fn ::start-transaction-if-needed!
+            :action :checking-if-transaction-needed)
+  (when-not (= :in-transaction (:transaction-status @state))
+      (log/info :fn ::start-transaction-if-needed!
+                :action :starting-transaction)
+    (try
+      (.beginTransaction (:producer @state))
+      (swap! state assoc :transaction-status :in-transaction)
+      (catch Exception e
+        (report-producer-error producer
+                               {:error :error-beginning-transaction
+                                :severity :critical
+                                :message (.getMessage e)})))))
+
+(defn send-record [{:keys [state] :as genegraph-producer} event]
+  (when (transactional-producer? genegraph-producer)
+    (swap! state update :uncommitted-records conj event)
+    (start-transaction-if-needed! genegraph-producer))
+  (.send
+   (:producer @state)
+   (-> event
+       event/serialize
+       event->producer-record)
+   (producer-callback genegraph-producer
+                      event)))
+
+(defn update-offsets [{:keys [state] :as genegraph-producer}
+                      {::event/keys [producer offset kafka-topic consumer-group]
+                       :as event}]
+  (log/info :fn :update-offsets
+            :transactional-producer? (transactional-producer? genegraph-producer)
+            :kafka-consumer-group consumer-group
+            :offset offset
+            :kafka-topic kafka-topic)
+  (when (and (transactional-producer? genegraph-producer)
+             consumer-group
+             offset
+             kafka-topic)
+    (start-transaction-if-needed! genegraph-producer)
+    (swap! state assoc-in [:new-offsets [consumer-group kafka-topic]] offset)))
+
+(defn start-publish-thread! [{:keys [queue state] :as producer}]
+  (.start
+   (Thread.
+    (fn []
+      (log/info :fn ::start-publish-thread :msg "publish thread started")
+      (while (running? producer)
+        (when-let [e (.poll queue 500 TimeUnit/MILLISECONDS)]
+          (log/info :fn :start-publish-thread
+                    :msg "processing event"
+                    :type (:type e :event))
+          (try
+            (case (:type e)
+              :commit (commit-transaction-if-needed! producer)
+              :offset (update-offsets producer (:event e))
+              (send-record producer e))
+            (catch Exception e
+              (report-producer-error producer
+                                     {:error :exception-sending-event
+                                      :severity :critical
+                                      :message (.getMessage e)})))))
+      (log/info :fn ::start-publish-thread :msg "publish thread stopped" )))))
+
+
+(defrecord GenegraphKafkaProducer
+    [state
+     kafka-cluster
+     kafka-transactional-id
+     kafka-consumer-group
+     producer-opts
+     queue
+     name]
+
+    p/Publisher
+    (publish [this event]
+      (when-not (.offer queue event 10 TimeUnit/SECONDS)
+        (report-producer-error this {:error :timeout-on-publish
+                                     :severity :critical})))
+
+    p/TransactionalPublisher
+
+    (send-offset [this event]
+      (when-not (.offer queue {:type :offset
+                               :event event} 10 TimeUnit/SECONDS)
+        (report-producer-error this {:error :timeout-on-offset-update
+                                     :severity :critical})))
+  
+    (commit [this]
+      (when-not (.offer queue {:type :commit} 10 TimeUnit/SECONDS)
+        (report-producer-error this {:error :timeout-on-commit
+                                     :severity :critical})))
+
+    ;; todo add client.id to kafka config
+    p/Lifecycle
+    (start [this]
+      (try
+        (let [p (create-producer!
+                 kafka-cluster
+                 (cond-> {"max.request.size" (int (* 1024 1024 10))}
+                   kafka-transactional-id (assoc "transactional.id" kafka-transactional-id)
+                   (keyword? name) (assoc "client.id" (clojure.core/name name))))]
+          (swap! state
+                 assoc
+                 :producer p
+                 :status :running)
+          (start-publish-thread! this))
+        (catch Exception e
+          (report-producer-error this
+                                 {:error :exception-starting-producer
+                                  :severity :critical
+                                  :message (.getMessage e)}))))
+    
+    (stop [this]
+      (perform-common-shutdown-actions! this)))
+
+(defmethod p/init :genegraph-kafka-producer [opts]
+  (-> opts
+      (assoc :state (atom {:status :initialized
+                           :records-sent 0
+                           :uncommitted-records []
+                           :new-offsets {}
+                           :restarts 0}))
+      (assoc :queue (ArrayBlockingQueue. 100))
+      map->GenegraphKafkaProducer))
+
+
 
 
 

@@ -11,8 +11,9 @@
 
 ;; Portal
 (comment
-  (def p (portal/open))
-  (add-tap #'portal/submit)
+  (do
+    (def p (portal/open))
+    (add-tap #'portal/submit))
   (portal/close)
   (portal/clear)
   )
@@ -20,18 +21,34 @@
 (def publish-interceptor
   (interceptor/interceptor
    {:name ::publish-interceptor
-    :enter (fn [e]
+    :enter (fn [{::event/keys [data] :as e}]
              (log/info :fn :publish-interceptor)
              (-> e 
                  (event/publish  {::event/key "k1"
-                                  ::event/data {:d1 "hi"}
+                                  ::event/data data
                                   ::event/topic :test-out-1})
                  (event/publish  {::event/key "k2"
-                                  ::event/data {:d2 "hi"}
+                                  ::event/data data
                                   ::event/topic :test-out-2})
                  (event/publish  {::event/key "k2"
-                                  ::event/data {:d2 "hi"}
+                                  ::event/data data
                                   ::event/topic :test-topic})))}))
+
+(def consumer-group-interceptor
+  (interceptor/interceptor
+   {:name ::publish-interceptor
+    :enter (fn [{::event/keys [data offset kafka-topic]
+                 :as e}]
+             (log/info :fn :publish-interceptor
+                       :offset offset
+                       :kafka-topic kafka-topic)
+             (-> e 
+                 (event/publish  {::event/key "cg1"
+                                  ::event/data data
+                                  ::event/topic :test-out-1})
+                 (event/publish  {::event/key "cg1"
+                                  ::event/data data
+                                  ::event/topic :test-out-2})))}))
 
 (def cg-interceptor
   (interceptor/interceptor
@@ -46,7 +63,7 @@
 
 (def base-interceptor
   (interceptor/interceptor
-   {:name ::cg-interceptor
+   {:name ::base-interceptor
     :enter (fn [e]
              (log/info :fn :base-interceptor
                        :payload (::event/data e)
@@ -96,6 +113,7 @@
              :type :kafka-consumer-group-topic
              :kafka-consumer-group "testcg9"
              :kafka-cluster :ccloud
+             :create-producer true
              :serialization :json
              :kafka-topic "genegraph-test"
              :kafka-topic-config {}
@@ -115,8 +133,9 @@
              :kafka-topic-config {}
              :kafka-topic "genegraph-test-out-1"}
             :test-out-2
-            {:name :test-base
+            {:name :test-out-2
              :type :kafka-producer-topic
+             :create-producer true
              :kafka-cluster :ccloud
              :serialization :json
              :kafka-topic-config {}
@@ -129,12 +148,14 @@
                  :name :genegraph-test-processor
                  :type :processor
                  :kafka-cluster :ccloud
-                 :interceptors [cg-interceptor]}
+                 :kafka-transactional-id "genegraph-fraomework-test-tx"
+                 :interceptors [consumer-group-interceptor]}
                 :test-publisher
                 {:name :genegraph-test-publisher
                  :subscribe :publish-to-test
                  :kafka-cluster :ccloud
                  :type :processor
+                 :kafka-transactional-id "genegraph-test-publisher"
                  :interceptors [publish-interceptor]}
                 :test-base-processor
                 {:name :genegraph-test-base-processor
@@ -148,8 +169,15 @@
   (def ccloud-example-app (p/init ccloud-example-app-def))
   (tap> (kafka-admin/admin-actions-by-cluster ccloud-example-app))
   (kafka-admin/configure-kafka-for-app! ccloud-example-app)
-  (p/start ccloud-example-app)
-  (p/stop ccloud-example-app)
+  (do 
+    (p/start ccloud-example-app)
+    (println "started)"))
+  (do
+    (p/stop ccloud-example-app)
+    (println "stopped"))
+  (tap> ccloud-example-app)
+
+  
 
   (storage/store-snapshot (get-in ccloud-example-app [:storage :test-rocksdb]))
   (storage/restore-snapshot (get-in ccloud-example-app [:storage :test-rocksdb]))
@@ -162,12 +190,27 @@
 
   (get-in ccloud-example-app [:storage :test-rocksdb])
 
-  (p/publish (get-in ccloud-example-app [:topics :publish-to-test])
-             {::event/key "k2"
+  (p/publish (get-in ccloud-example-app [:topics :test-out-2])
+             {::event/key "kn23"
               ::event/data {:b :b}
               :payload {::event/topic :test-base
                         ::event/key "k4"
                         ::event/data {:d :d}}})
+
+  (run! #(p/publish (get-in ccloud-example-app [:topics :publish-to-test])
+                    {::event/key "sequence1"
+                     ::event/data {:n %}})
+        (range 0 5))
+
+
+  (run! #(p/publish (get-in ccloud-example-app [:topics :test-topic])
+                    {::event/key "tt3"
+                     ::event/data {:n %}})
+        (range 0 10))
+  
+  (p/publish (get-in ccloud-example-app [:topics :publish-to-test])
+             {::event/key "k2"
+              ::event/data {:b :b}})
 
   (p/publish (get-in ccloud-example-app [:topics :test-topic])
              {::event/key "k2"

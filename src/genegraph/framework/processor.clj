@@ -12,42 +12,16 @@
            [org.apache.kafka.clients.consumer ConsumerGroupMetadata OffsetAndMetadata]
            [java.util.concurrent ArrayBlockingQueue BlockingQueue TimeUnit Semaphore]))
 
-;; Kafka specific stuff
-;; This probably gets refactored as soon as another message broker is supported
-
-;; TODO UnifiedExceptionHandling
-
-(defn commit-kafka-transaction! [event]
-  (when-let [^Producer p (::event/producer event)]
-    (try 
-      (.commitTransaction p)
-      (catch Exception e
-        (log/warn :fn :commit-kafka-transaction!
-                  :exception (str (type e))
-                  :exception-class :kafka))))
+(defn commit-kafka-transaction! [{::event/keys [producer] :as event}]
+  (when producer
+    (log/info :fn ::commit-kafka-transaction!
+              :action :sending-commit-record)
+    (p/commit producer))
   event)
 
-
-;; TODO UnifiedExceptionHandling
-
-(defn add-offset-to-tx! [{::event/keys [producer consumer-group offset kafka-topic]
-                          :as event}]
-  (when (and producer consumer-group offset kafka-topic)
-    (try
-      (.sendOffsetsToTransaction
-       producer
-       {(TopicPartition. kafka-topic 0)
-        (OffsetAndMetadata. (+ 1 offset))} ; use next offset, per kafka docs
-       (ConsumerGroupMetadata. consumer-group))
-      (catch Exception e
-        (log/warn :fn ::add-offset-to-tx!
-                  :exception-class :kafka)
-        (throw e))))
-  event)
-
-(defn open-kafka-transaction! [event]
-  (when-let [^Producer p (::event/producer event)]
-    (.beginTransaction p))
+(defn add-offset-to-tx! [{::event/keys [producer offset] :as event}]
+  (when (and producer offset)
+    (p/send-offset producer event))
   event)
 
 ;; /Kafka stuff
@@ -61,7 +35,6 @@
 
 (defn perform-publish-effects! [event]
   (-> event
-      open-kafka-transaction!
       publish-events!
       add-offset-to-tx!
       commit-kafka-transaction!))
@@ -139,9 +112,7 @@
   (assoc event ::event/backing-store (backing-store-instance processor)))
 
 (defn add-producer [event processor]
-  (if-let [producer (:producer @(:state processor))]
-    (assoc event ::event/producer producer)
-    event))
+  (assoc event ::event/producer (:kafka-producer @(:state processor))))
 
 (defn add-topics [event processor]
   (assoc event ::event/topics (:topics processor)))
@@ -209,15 +180,6 @@
         (+ 1 o)))
     nil))
 
-(defn init-kafka-producer! [{:keys [kafka-cluster state] :as p}]
-  (when kafka-cluster
-    (let [producer (kafka/create-producer
-                    kafka-cluster
-                    {"transactional.id" (or (:kafka-transactional-id p)
-                                            (name (:name p)))
-                     "max.request.size" (int (* 1024 1024 10))})]
-      (swap! state assoc :producer producer))))
-
 (defn set-topic-offset! [processor subscribed-topic]
   (when (satisfies? p/Offsets subscribed-topic)
     (p/set-offset! subscribed-topic (initial-offset processor))))
@@ -268,7 +230,7 @@
       (p/system-update this {:state :starting})
       (swap! state assoc :status :running)
       ;; start producer first, else race condition
-      (init-kafka-producer! this)
+      (kafka/init-producer! this)
       (when-let [subscribed-topic (get-subscribed-topic this)]
         (set-topic-offset! this subscribed-topic)
         (.start
@@ -289,8 +251,7 @@
   
   (stop [this]
     (swap! state assoc :status :stopped)
-    (when kafka-cluster
-      (.close (:producer @state)))))
+    (kafka/stop-producer! this)))
 
 (defmethod p/init :processor [processor-def]
   (map->Processor (processor-init processor-def)))
@@ -312,7 +273,6 @@
       new-gate)))
 
 (defn await-prior-event [{:keys [gate-fn state parallel-gate-timeout] :as processor} event]
-  #_(tap> processor)
   (let [k (gate-fn (::event/data event))
         gate (get (:gates @state) k)
         timeout (or parallel-gate-timeout 30)]
@@ -360,7 +320,7 @@
   (start [this]
     (swap! state assoc :status :running)
     ;; start producer first, else race condition
-    (init-kafka-producer! this)
+    (kafka/init-producer! this)
     (when-let [subscribed-topic (get-subscribed-topic this)]
       (set-topic-offset! this subscribed-topic)
       (.start
@@ -391,16 +351,15 @@
         #(while (p/running? this)
            (try 
              (when-let [event-future (.poll effect-queue
-                                             500
-                                             TimeUnit/MILLISECONDS)]
+                                            500
+                                            TimeUnit/MILLISECONDS)]
                (process-event-effects! @event-future))
              (catch Exception e
                (log/error :source ::start :record ::ParallelProcessor))))))))
   
   (stop [this]
     (swap! state assoc :status :stopped)
-    (when kafka-cluster
-      (.close (:producer @state)))))
+    (kafka/stop-producer! this)))
 
 (derive ParallelProcessor :genegraph/processor)
 

@@ -68,4 +68,5 @@
   (update event
           ::publish
           conj
-          publish-event))
+          (assoc publish-event
+                 :commit-promise (promise))))

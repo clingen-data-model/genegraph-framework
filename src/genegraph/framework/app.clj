@@ -12,7 +12,6 @@
             [genegraph.framework.kafka.admin :as kafka-admin]
             [genegraph.framework.topic :as topic]
             [genegraph.framework.event :as event]
-            #_[io.pedestal.http :as http]
             [io.pedestal.interceptor :as interceptor]
             [io.pedestal.log :as log]
             [clojure.spec.alpha :as spec]))

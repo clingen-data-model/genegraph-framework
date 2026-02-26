@@ -28,6 +28,12 @@
   "For topics allowing publication of records"
   (publish [this event] "Publish event to topic"))
 
+(defprotocol TransactionalPublisher
+  "Supports commits and offsets for transactional publishing of events"
+  (send-offset [this event] "Send offset from the event to transaction. Used by Kafka.")
+  (commit [this]
+    "Commit transaction if transactional producer. Will deliver commit promises for relevant events."))
+
 (defprotocol Offsets
   "For topics supporting offsets"
   (set-offset! [this offset] "Set local offset for topic"))

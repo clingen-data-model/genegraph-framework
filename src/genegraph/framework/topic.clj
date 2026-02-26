@@ -20,7 +20,11 @@
 
   p/Publisher
   (publish [this event]
-    (.offer queue event timeout TimeUnit/MILLISECONDS)))
+    (when-let [p (:commit-promise event)]
+      (deliver p true))
+    (.offer queue event timeout TimeUnit/MILLISECONDS))
+
+  )
 
 (derive SimpleQueueTopic :genegraph/topic)
 
