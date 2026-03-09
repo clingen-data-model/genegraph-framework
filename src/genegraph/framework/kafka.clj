@@ -11,6 +11,10 @@
            [org.apache.kafka.clients.consumer Consumer KafkaConsumer ConsumerGroupMetadata
             OffsetAndMetadata ConsumerRebalanceListener]
            [org.apache.kafka.common KafkaFuture TopicPartition]
+           [org.apache.kafka.common.errors
+            ApplicationRecoverableException
+            RetriableException
+            InvalidConfigurationException]
            [java.time Duration]
            [java.util.concurrent BlockingQueue ArrayBlockingQueue LinkedBlockingQueue TimeUnit]))
 
@@ -43,10 +47,77 @@
    ::event/completion-promise (promise)
    ::event/execution-thread (promise)})
 
+(def ignorable-exceptions
+  [org.apache.kafka.common.errors.WakeupException
+   org.apache.kafka.common.errors.InterruptException
+   org.apache.kafka.common.errors.RebalanceInProgressException])
+
+(def fatal-exceptions
+  [org.apache.kafka.common.errors.UnsupportedForMessageFormatException
+   org.apache.kafka.common.errors.UnsupportedVersionException
+   org.apache.kafka.common.errors.AuthenticationException
+   org.apache.kafka.common.errors.AuthorizationException
+   IllegalArgumentException
+   IllegalStateException
+   ArithmeticException
+   org.apache.kafka.common.errors.InvalidTopicException
+   org.apache.kafka.common.errors.InvalidOffsetException
+   org.apache.kafka.clients.consumer.InvalidOffsetException])
+
+(def restartable-exceptions
+  [org.apache.kafka.common.errors.ProducerFencedException
+   org.apache.kafka.common.errors.InvalidProducerEpochException
+   org.apache.kafka.common.errors.TimeoutException
+   org.apache.kafka.clients.consumer.CommitFailedException
+   org.apache.kafka.common.errors.FencedInstanceIdException
+   org.apache.kafka.common.errors.ApplicationRecoverableException
+   ;; KafkaException is a superclass of most of the above exceptions
+   ;; the assumption is that one should try a restart
+   ;; 
+   org.apache.kafka.common.KafkaException])
+
+(defn in-exception-category? [e category]
+  (some #(instance? % e) category))
+
+
+
+(defn exception-outcome [e]
+  (condp instance? e
+    ApplicationRecoverableException :restart-client
+    RetriableException :retry-action
+    InvalidConfigurationException :halt-application
+    :unknown-outcome))
+
+(defn exception->error-map [e]
+  {:exception (.getName (class e))
+   :message (.getMessage e)
+   :outcome (exception-outcome e)})
+
+(comment
+  (exception->error-map
+   (org.apache.kafka.clients.consumer.NoOffsetForPartitionException.
+    (TopicPartition. "test" 0)))
+
+  (exception->error-map
+   (org.apache.kafka.common.errors.TimeoutException.))
+
+  (exception-outcome
+   (org.apache.kafka.common.errors.ProducerFencedException. "fenced!")
+   )
+  (exception->error-map
+   (org.apache.kafka.common.errors.ProducerFencedException. "fenced!")
+   )
+  )
 
 ;; TODO UnifiedExceptionHandling
 
+;; why does this throw an InstantiationError
 
+(try
+  (throw (org.apache.kafka.clients.consumer.NoOffsetForPartitionException.
+          (TopicPartition. "test" 0)))
+  (catch Exception e
+    (instance? org.apache.kafka.clients.consumer.InvalidOffsetException e)))
 
 (defn publish [topic event]
   (p/publish
@@ -147,19 +218,10 @@
   ([consumer]
    (poll-kafka-consumer consumer {}))
   ([consumer m]
-   (try
-     (->> (.poll consumer (Duration/ofMillis 100))
-          .iterator
-          iterator-seq
-          (mapv #(-> % consumer-record->event (merge m))))
-     (catch Exception e
-       (log/warn :fn ::poll-kafka-consumer
-                 :exception (str (type e))
-                 :exception-class :kafka
-                 :subscription (str/join
-                                ", "
-                                (.subscription consumer)))
-       (throw e)))))
+   (->> (.poll consumer (Duration/ofMillis 500))
+        .iterator
+        iterator-seq
+        (mapv #(-> % consumer-record->event (merge m))))))
 
 (defn initial-state []
   {:delivered-up-to-date-event? false
@@ -346,7 +408,7 @@
       (swap! (:state opts) assoc :kafka-producer producer))))
 
 (defn perform-common-startup-actions! [{:keys [state] :as topic}]
-  (reset! state (initial-state))
+  #_(reset! state (initial-state))
   (swap! state assoc :status :running)
   (when (:create-producer topic)
     (init-producer! topic))
@@ -362,6 +424,9 @@
   (stop-producer! topic)
   (swap! state assoc :status :stopped))
 
+;; Write last offset to state, check last offset before
+;; pushing event to queue--should cover case were poll fails with
+;; events in flight
 (defrecord KafkaConsumerGroupTopic
     [name
      buffer-size
@@ -390,7 +455,6 @@
               (.subscribe new-consumer
                           [kafka-topic]
                           (consumer-rebalance-listener this))
-              ;; is the following idomatic Clojure?
               (loop [events (update-local-storage! this)]
                 (run! #(deliver-event
                         this
@@ -562,8 +626,7 @@
   (:kafka-transactional-id producer))
 
 (defn running? [{:keys [state]}]
-  (let [status (:status @state)]
-    (get #{:running :degraded} status)))
+  (not (get #{:stopped :failed} (:status @state))))
 
 (defn report-producer-error [producer error]
   (log/error
@@ -703,6 +766,10 @@
                                       :message (.getMessage e)})))))
       (log/info :fn ::start-publish-thread :msg "publish thread stopped" )))))
 
+(defn restart-kafka-producer! [{:keys [state] :as genegraph-producer}]
+  (swap! state :status :restarting)
+  (.close (:producer @state))
+  )
 
 (defrecord GenegraphKafkaProducer
     [state
@@ -752,8 +819,11 @@
                                   :severity :critical
                                   :message (.getMessage e)}))))
     
+    ;; this doesn't actually close the producer, should fix this
     (stop [this]
-      (perform-common-shutdown-actions! this)))
+      (.close (:producer @state))
+      (swap! state :status :stopped)
+      #_(perform-common-shutdown-actions! this)))
 
 (defmethod p/init :genegraph-kafka-producer [opts]
   (-> opts
