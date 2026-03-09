@@ -251,7 +251,13 @@
   
   (stop [this]
     (swap! state assoc :status :stopped)
-    (kafka/stop-producer! this)))
+    (kafka/stop-producer! this))
+
+  p/Status
+  (status [this]
+    {:name name
+     :subscribe subscribe
+     :status (:status @state)}))
 
 (defmethod p/init :processor [processor-def]
   (map->Processor (processor-init processor-def)))
@@ -359,7 +365,15 @@
   
   (stop [this]
     (swap! state assoc :status :stopped)
-    (kafka/stop-producer! this)))
+    (kafka/stop-producer! this))
+
+  p/Status
+  (status [this]
+    {:name name
+     :subscribe subscribe
+     :status (:status @state)
+     :deserialized-event-queue-size (.size deserialized-event-queue)
+     :effect-queue-size (.size effect-queue)}))
 
 (derive ParallelProcessor :genegraph/processor)
 

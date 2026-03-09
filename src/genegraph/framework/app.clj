@@ -30,7 +30,21 @@
        vals
        (remove #(= :system (:subscribe %)))))
 
+(defn- component-statuses [components]
+  (into {}
+        (keep (fn [[k v]]
+                (when (satisfies? p/Status v)
+                  [k (p/status v)]))
+              components)))
+
 (defrecord App [topics storage processors http-servers]
+
+  p/Status
+  (status [this]
+    {:topics       (component-statuses topics)
+     :storage      (component-statuses storage)
+     :processors   (component-statuses processors)
+     :http-servers (component-statuses http-servers)})
 
   ;; Reset all components in app, according to their
   ;; reset options

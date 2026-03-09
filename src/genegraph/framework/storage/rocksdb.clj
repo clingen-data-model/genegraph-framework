@@ -135,7 +135,11 @@
         (-> this :snapshot-handle storage/as-handle storage/delete-handle))
       (destroy path)))
 
-  )
+  p/Status
+  (status [this]
+    {:name name
+     :path path
+     :status @state}))
 
 (defmethod p/init :rocksdb [db-def]
   (map->RocksDBInstance

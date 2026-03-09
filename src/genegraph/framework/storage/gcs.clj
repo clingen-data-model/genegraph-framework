@@ -174,7 +174,13 @@
     this)
   (stop [this]
     (reset! state :stopped)
-    this))
+    this)
+
+  p/Status
+  (status [this]
+    {:name name
+     :bucket bucket
+     :status @state}))
 
 (defmethod p/init :gcs-bucket [bucket-def]
   (map->GCS

@@ -8,7 +8,13 @@
                       state
                       instance]
   storage/HasInstance
-  (instance [this] instance))
+  (instance [this] instance)
+
+  p/Status
+  (status [this]
+    {:name name
+     :status (:status @state)
+     :count (count @instance)}))
 
 
 

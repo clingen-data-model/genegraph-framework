@@ -500,7 +500,20 @@
       (publish this event))
 
     p/Offsets
-    (set-offset! [this offset] (deliver (:initial-local-offset @state) offset)))
+    (set-offset! [this offset] (deliver (:initial-local-offset @state) offset))
+
+    p/Status
+    (status [this]
+      (let [s @state]
+        {:name name
+         :kafka-topic kafka-topic
+         :kafka-consumer-group kafka-consumer-group
+         :status (:status s)
+         :queue-size (.size queue)
+         :remaining-capacity (.remainingCapacity queue)
+         :last-delivered-event-offset (:last-delivered-event-offset s)
+         :last-completed-offset (:last-completed-offset s)
+         :up-to-date (:delivered-up-to-date-event? s)})))
 
 (derive KafkaConsumerGroupTopic :genegraph/topic)
 
@@ -532,7 +545,11 @@
   (publish [this event]
     (publish this event))
 
-  )
+  p/Status
+  (status [this]
+    {:name name
+     :kafka-topic kafka-topic
+     :status (:status @state)}))
 
 (derive KafkaProducerTopic :genegraph/topic)
 
@@ -592,7 +609,19 @@
 
   p/Offsets
   (set-offset! [this offset]
-    (deliver (:initial-local-offset @state) offset)))
+    (deliver (:initial-local-offset @state) offset))
+
+  p/Status
+  (status [this]
+    (let [s @state]
+      {:name name
+       :kafka-topic kafka-topic
+       :status (:status s)
+       :queue-size (.size queue)
+       :remaining-capacity (.remainingCapacity queue)
+       :last-delivered-event-offset (:last-delivered-event-offset s)
+       :last-completed-offset (:last-completed-offset s)
+       :up-to-date (:delivered-up-to-date-event? s)})))
 
 (derive KafkaReaderTopic :genegraph/topic)
 

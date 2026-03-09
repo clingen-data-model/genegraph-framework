@@ -106,7 +106,13 @@
   
   (stop [this]
     (.close @instance)
-    (reset! state :stopped)))
+    (reset! state :stopped))
+
+  p/Status
+  (status [this]
+    {:name name
+     :path path
+     :status @state}))
 
 (defmethod p/init :rdf [storage-def]
   (map->RDFStore

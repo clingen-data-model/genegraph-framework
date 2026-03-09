@@ -18,7 +18,13 @@
     (conn/start! connector))
   (stop [this]
     (swap! state assoc :status :stopped)
-    (conn/stop! connector)))
+    (conn/stop! connector))
+
+  p/Status
+  (status [this]
+    {:name name
+     :port (:port this)
+     :status (:status @state)}))
 
 (defn endpoint->route [{:keys [path processor method] :or {method :get}}]
   (let [http-method (or method :get)]

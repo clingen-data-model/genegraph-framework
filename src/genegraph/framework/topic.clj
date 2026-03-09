@@ -24,7 +24,11 @@
       (deliver p true))
     (.offer queue event timeout TimeUnit/MILLISECONDS))
 
-  )
+  p/Status
+  (status [this]
+    {:name name
+     :queue-size (.size queue)
+     :remaining-capacity (.remainingCapacity queue)}))
 
 (derive SimpleQueueTopic :genegraph/topic)
 
@@ -41,5 +45,6 @@
                   :type :simple-queue-topic}))
   (p/publish q {:key "k" :value "v"})
   (p/poll q)
+  (p/status q)
 
   )

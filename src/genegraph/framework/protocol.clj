@@ -47,6 +47,10 @@
   operation as a sequence of interceptors."
   (as-interceptors [this] "Return a sequence of interceptors to perform the event handling for an event"))
 
+(defprotocol Status
+  "Returns the current status of the entity in a Clojure map. Valid values are keywords, strings and numbers. Maps and vectors may be returned for including the status of nested elements."
+  (status [this]))
+
 (defn running?
   "True if component is running. Depends on component having a :state
   atom with a :status field reporting its current state."
