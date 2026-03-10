@@ -140,7 +140,7 @@
 (defmethod p/init :rocksdb [db-def]
   (map->RocksDBInstance
    (assoc db-def
-          :state (atom :stopped)
+          :state (atom {:status :stopped})
           :instance (atom nil))))
 
 (defn prefix-range-end
@@ -219,7 +219,11 @@
   {:read rocks-get}
 
   storage/IndexedDelete
-  {:delete (fn [this k] (.delete this (k->bytes k)))}
+  {:delete (fn
+             ([this k] (.delete this (k->bytes k)))
+             ([this k commit-promise]
+              (.delete this (k->bytes k))
+              (deliver commit-promise true)))}
 
   storage/RangeRead
   {:scan scan}
