@@ -796,7 +796,7 @@
       (log/info :fn ::start-publish-thread :msg "publish thread stopped" )))))
 
 (defn restart-kafka-producer! [{:keys [state] :as genegraph-producer}]
-  (swap! state :status :restarting)
+  (swap! state assoc :status :restarting)
   (.close (:producer @state))
   )
 
@@ -851,7 +851,7 @@
     ;; this doesn't actually close the producer, should fix this
     (stop [this]
       (.close (:producer @state))
-      (swap! state :status :stopped)
+      (swap! state assoc :status :stopped)
       #_(perform-common-shutdown-actions! this)))
 
 (defmethod p/init :genegraph-kafka-producer [opts]

@@ -169,12 +169,11 @@
   (def ccloud-example-app (p/init ccloud-example-app-def))
   (tap> (kafka-admin/admin-actions-by-cluster ccloud-example-app))
   (kafka-admin/configure-kafka-for-app! ccloud-example-app)
-  (do 
-    (p/start ccloud-example-app)
-    (println "started)"))
-  (do
-    (p/stop ccloud-example-app)
-    (println "stopped"))
+  (p/start ccloud-example-app)
+  (p/stop ccloud-example-app)
+  
+  (tap> (p/status ccloud-example-app))
+  (println "stopped")
   (tap> ccloud-example-app)
 
   

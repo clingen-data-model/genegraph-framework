@@ -62,7 +62,7 @@
                   (vals topics)
                   (non-system-processors processors)
                   (vals http-servers)))
-    this)
+    (p/status this))
   (stop [this]
     (run! #(when (satisfies? p/Lifecycle %) (p/stop %))
           (concat (vals http-servers)
@@ -70,7 +70,7 @@
                   (vals storage)
                   (vals topics)))
     (p/stop (select-system-processor processors))
-    this))
+    (p/status this)))
 
 
 (defn create-system-topic []

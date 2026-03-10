@@ -271,13 +271,6 @@
               (interceptor-chain/enqueue (:interceptors processor))
               interceptor-chain/execute))))
 
-(defn get-or-create-gate [state event k]
-  (if-let [gate (get (:gates @state) k)]
-    gate
-    (let [new-gate (Semaphore. 1 true)]
-      (swap! state assoc-in :gates k new-gate)
-      new-gate)))
-
 (defn await-prior-event [{:keys [gate-fn state parallel-gate-timeout] :as processor} event]
   (let [k (gate-fn (::event/data event))
         gate (get (:gates @state) k)

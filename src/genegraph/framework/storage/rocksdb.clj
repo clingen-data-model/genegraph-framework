@@ -123,9 +123,11 @@
     (when (:load-snapshot this)
       (storage/restore-snapshot this))
     (reset! instance (open path))
+    (swap! state assoc :status :started)
     this)
   (stop [this]
     (.close @instance)
+    (swap! state assoc :status :stopped)
     this)
 
   p/Resetable
