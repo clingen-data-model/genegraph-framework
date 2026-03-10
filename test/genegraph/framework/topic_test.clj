@@ -1,7 +1,7 @@
 (ns genegraph.framework.topic-test
   (:require [genegraph.framework.protocol :as p]
             [genegraph.framework.event :as event]
-            [genegraph.framework.topic]           ; loads defmethod for :simple-queue-topic
+            [genegraph.framework.topic]           ; loads defmethods for :simple-queue-topic and :timer-topic
             [clojure.test :refer [deftest testing is]]))
 
 ;; ---------------------------------------------------------------------------
@@ -240,3 +240,179 @@
       (is (satisfies? p/Consumer topic))
       (is (satisfies? p/Publisher topic))
       (is (satisfies? p/Status topic)))))
+
+;; ===========================================================================
+;; TimerTopic
+;; ===========================================================================
+
+(defn make-timer-topic
+  "Initialize a TimerTopic with a short interval and poll timeout for fast tests."
+  [& {:as opts}]
+  (p/init (merge {:name     :test-timer
+                  :type     :timer-topic
+                  :interval 50     ; ms between ticks
+                  :timeout  100}   ; ms poll blocks waiting
+                 opts)))
+
+;; ---------------------------------------------------------------------------
+;; p/init
+;; ---------------------------------------------------------------------------
+
+(deftest timer-init-test
+  (testing "p/init with :type :timer-topic returns a TimerTopic"
+    (let [topic (make-timer-topic)]
+      (is (instance? genegraph.framework.topic.TimerTopic topic))))
+
+  (testing "interval is stored on the record"
+    (let [topic (make-timer-topic :interval 200)]
+      (is (= 200 (:interval topic)))))
+
+  (testing "default timeout of 1000ms is applied when not specified"
+    (let [topic (p/init {:name :t :type :timer-topic :interval 50})]
+      (is (= 1000 (:timeout topic)))))
+
+  (testing "explicit :timeout is respected"
+    (let [topic (make-timer-topic :timeout 250)]
+      (is (= 250 (:timeout topic)))))
+
+  (testing "satisfies Consumer, Lifecycle, and Status protocols"
+    (let [topic (make-timer-topic)]
+      (is (satisfies? p/Consumer topic))
+      (is (satisfies? p/Lifecycle topic))
+      (is (satisfies? p/Status topic))))
+
+  (testing "does not satisfy Publisher (events are self-generated)"
+    (let [topic (make-timer-topic)]
+      (is (not (satisfies? p/Publisher topic))))))
+
+;; ---------------------------------------------------------------------------
+;; p/status
+;; ---------------------------------------------------------------------------
+
+(deftest timer-status-test
+  (testing "status includes :name"
+    (let [topic (make-timer-topic :name :my-timer)]
+      (is (= :my-timer (:name (p/status topic))))))
+
+  (testing "status includes :interval"
+    (let [topic (make-timer-topic :interval 123)]
+      (is (= 123 (:interval (p/status topic))))))
+
+  (testing "status includes :queue-size"
+    (let [topic (make-timer-topic)]
+      (is (contains? (p/status topic) :queue-size))))
+
+  (testing "status is :stopped before start"
+    (let [topic (make-timer-topic)]
+      (is (= :stopped (:status (p/status topic))))))
+
+  (testing "status is :running after start"
+    (let [topic (make-timer-topic)]
+      (p/start topic)
+      (try
+        (is (= :running (:status (p/status topic))))
+        (finally (p/stop topic)))))
+
+  (testing "status is :stopped after stop"
+    (let [topic (make-timer-topic)]
+      (p/start topic)
+      (p/stop topic)
+      (Thread/sleep 100) ; allow virtual thread to exit
+      (is (= :stopped (:status (p/status topic)))))))
+
+;; ---------------------------------------------------------------------------
+;; poll before start
+;; ---------------------------------------------------------------------------
+
+(deftest timer-poll-before-start-test
+  (testing "poll returns nil before start (queue is empty)"
+    (let [topic (make-timer-topic)]
+      (is (nil? (p/poll topic))))))
+
+;; ---------------------------------------------------------------------------
+;; tick delivery
+;; ---------------------------------------------------------------------------
+
+(deftest timer-tick-delivery-test
+  (testing "poll returns a tick event within interval + buffer after start"
+    (let [topic (make-timer-topic :interval 50)]
+      (p/start topic)
+      (try
+        (let [event (p/poll topic)]
+          (is (some? event)))
+        (finally (p/stop topic)))))
+
+  (testing "tick event has ::event/topic set to topic :name"
+    (let [topic (make-timer-topic :name :my-timer :interval 50)]
+      (p/start topic)
+      (try
+        (let [event (p/poll topic)]
+          (is (= :my-timer (::event/topic event))))
+        (finally (p/stop topic)))))
+
+  (testing "tick event carries ::event/data with :type :timer-tick"
+    (let [topic (make-timer-topic :interval 50)]
+      (p/start topic)
+      (try
+        (let [event (p/poll topic)]
+          (is (= :timer-tick (get-in event [::event/data :type]))))
+        (finally (p/stop topic)))))
+
+  (testing "tick event carries ::event/data with a :timestamp"
+    (let [topic (make-timer-topic :interval 50)]
+      (p/start topic)
+      (try
+        (let [event (p/poll topic)]
+          (is (some? (get-in event [::event/data :timestamp]))))
+        (finally (p/stop topic)))))
+
+  (testing "tick event carries an undelivered ::event/completion-promise"
+    (let [topic (make-timer-topic :interval 50)]
+      (p/start topic)
+      (try
+        (let [event (p/poll topic)]
+          (is (instance? clojure.lang.IPending (::event/completion-promise event)))
+          (is (not (realized? (::event/completion-promise event)))))
+        (finally (p/stop topic)))))
+
+  (testing "each tick gets its own distinct completion-promise"
+    (let [topic (make-timer-topic :interval 50)]
+      (p/start topic)
+      (try
+        (let [e1 (p/poll topic)
+              e2 (p/poll topic)]
+          (is (some? e1))
+          (is (some? e2))
+          (is (not (identical? (::event/completion-promise e1)
+                               (::event/completion-promise e2)))))
+        (finally (p/stop topic))))))
+
+;; ---------------------------------------------------------------------------
+;; tick drop on slow consumer
+;; ---------------------------------------------------------------------------
+
+(deftest timer-tick-drop-test
+  (testing "queue never exceeds capacity of 1 — slow consumer causes ticks to be dropped"
+    ;; Start the topic, wait for multiple intervals without polling, then check
+    ;; that the queue holds at most one pending tick.
+    (let [topic (make-timer-topic :interval 30)]
+      (p/start topic)
+      (try
+        (Thread/sleep 200) ; allow ~6 ticks to fire, but queue cap is 1
+        (is (<= (:queue-size (p/status topic)) 1))
+        (finally (p/stop topic))))))
+
+;; ---------------------------------------------------------------------------
+;; stop halts tick production
+;; ---------------------------------------------------------------------------
+
+(deftest timer-stop-test
+  (testing "after stop, poll returns nil (no further ticks are enqueued)"
+    (let [topic (make-timer-topic :interval 50 :timeout 50)]
+      (p/start topic)
+      (p/poll topic) ; drain any tick already queued
+      (p/stop topic)
+      (Thread/sleep 150) ; wait for virtual thread to exit and any in-flight tick to clear
+      ;; Drain one more time in case a tick was in-flight at stop, then check no further ticks
+      (p/poll topic)
+      (is (nil? (p/poll topic))))))

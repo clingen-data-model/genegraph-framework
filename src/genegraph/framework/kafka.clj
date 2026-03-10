@@ -768,7 +768,6 @@
         (report-producer-error this {:error :timeout-on-commit
                                      :severity :critical})))
 
-    ;; todo add client.id to kafka config
     p/Lifecycle
     (start [this]
       (try
@@ -788,11 +787,9 @@
                                   :severity :critical
                                   :message (.getMessage e)}))))
     
-    ;; this doesn't actually close the producer, should fix this
     (stop [this]
       (.close (:producer @state))
-      (swap! state assoc :status :stopped)
-      #_(perform-common-shutdown-actions! this)))
+      (swap! state assoc :status :stopped)))
 
 (defmethod p/init :genegraph-kafka-producer [opts]
   (-> opts
