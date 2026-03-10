@@ -447,7 +447,3 @@
 
 
   )
-
-(Thread/startVirtualThread #(println "Hello world!"))
-
-(repeat 10 "I will not throw spitballs at teacher.")

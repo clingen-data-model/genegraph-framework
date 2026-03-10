@@ -161,10 +161,6 @@
 (defn curie [iri]
   (.shortForm names/prefix-mapping (str iri)))
 
-(.shortForm names/prefix-mapping "http://purl.obolibrary.org/obo/MONDO_0100038")
-
-(.getNsPrefixMap names/prefix-mapping)
-
 (defn ld1-> [r ks]
   (types/ld1-> r ks))
 

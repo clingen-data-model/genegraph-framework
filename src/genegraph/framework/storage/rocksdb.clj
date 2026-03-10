@@ -17,12 +17,6 @@
     k
     (.hashBytes (LongHashFunction/xx3) (.getBytes (str k)))))
 
-(defn vec->key-bytes [x]
-  (println "vector")
-  (let [bs (ByteBuffer/allocate (* 8 (count x)))]
-    (run! #(.putLong bs (k->long %)) x)
-    (.toByteArray bs)))
-
 (def array-of-bytes-type (Class/forName "[B"))
 
 ;; Keys fall into four categories:

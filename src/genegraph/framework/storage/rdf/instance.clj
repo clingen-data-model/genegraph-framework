@@ -202,13 +202,15 @@
               (.end dataset))))))
     (deliver complete-promise true)))
 
-(defn execute-async
+;; TODO DEAD CODE
+#_(defn execute-async
   "execute command list asynchronously"
   [{:keys [run-atom queue] :as dataset} commands]
   (when @run-atom
     (run! #(.put queue %) commands)))
 
-(defn execute-sync
+;; TODO DELETE DEAD CODE
+#_(defn execute-sync
   "Execute command list synchronously. Will claim write transaction."
   [{:keys [dataset]} commands]
   (.begin dataset ReadWrite/WRITE)

@@ -47,40 +47,6 @@
    ::event/completion-promise (promise)
    ::event/execution-thread (promise)})
 
-(def ignorable-exceptions
-  [org.apache.kafka.common.errors.WakeupException
-   org.apache.kafka.common.errors.InterruptException
-   org.apache.kafka.common.errors.RebalanceInProgressException])
-
-(def fatal-exceptions
-  [org.apache.kafka.common.errors.UnsupportedForMessageFormatException
-   org.apache.kafka.common.errors.UnsupportedVersionException
-   org.apache.kafka.common.errors.AuthenticationException
-   org.apache.kafka.common.errors.AuthorizationException
-   IllegalArgumentException
-   IllegalStateException
-   ArithmeticException
-   org.apache.kafka.common.errors.InvalidTopicException
-   org.apache.kafka.common.errors.InvalidOffsetException
-   org.apache.kafka.clients.consumer.InvalidOffsetException])
-
-(def restartable-exceptions
-  [org.apache.kafka.common.errors.ProducerFencedException
-   org.apache.kafka.common.errors.InvalidProducerEpochException
-   org.apache.kafka.common.errors.TimeoutException
-   org.apache.kafka.clients.consumer.CommitFailedException
-   org.apache.kafka.common.errors.FencedInstanceIdException
-   org.apache.kafka.common.errors.ApplicationRecoverableException
-   ;; KafkaException is a superclass of most of the above exceptions
-   ;; the assumption is that one should try a restart
-   ;; 
-   org.apache.kafka.common.KafkaException])
-
-(defn in-exception-category? [e category]
-  (some #(instance? % e) category))
-
-
-
 (defn exception-outcome [e]
   (condp instance? e
     ApplicationRecoverableException :restart-client
@@ -92,32 +58,6 @@
   {:exception (.getName (class e))
    :message (.getMessage e)
    :outcome (exception-outcome e)})
-
-(comment
-  (exception->error-map
-   (org.apache.kafka.clients.consumer.NoOffsetForPartitionException.
-    (TopicPartition. "test" 0)))
-
-  (exception->error-map
-   (org.apache.kafka.common.errors.TimeoutException.))
-
-  (exception-outcome
-   (org.apache.kafka.common.errors.ProducerFencedException. "fenced!")
-   )
-  (exception->error-map
-   (org.apache.kafka.common.errors.ProducerFencedException. "fenced!")
-   )
-  )
-
-;; TODO UnifiedExceptionHandling
-
-;; why does this throw an InstantiationError
-
-(try
-  (throw (org.apache.kafka.clients.consumer.NoOffsetForPartitionException.
-          (TopicPartition. "test" 0)))
-  (catch Exception e
-    (instance? org.apache.kafka.clients.consumer.InvalidOffsetException e)))
 
 (defn publish [topic event]
   (p/publish

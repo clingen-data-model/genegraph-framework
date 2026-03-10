@@ -92,11 +92,13 @@
                   (fn [[_ ns n]]
                     (str "<" (names/kw->iri (keyword ns n)) ">"))))
 
-(defmacro declare-query [& queries]
-  (let [root# (-> *ns* str (string/replace #"\." "/") (string/replace #"-" "_") (str "/"))]
-    `(do ~@(map #(let [filename# (str root# (string/replace % #"-" "_" ) ".sparql")]
-                   `(def ~% (-> ~filename# io/resource slurp create-query)))
-                queries))))
+
+;; TODO DEAD CODE REMOVAL
+#_(defmacro declare-query [& queries]
+    (let [root# (-> *ns* str (string/replace #"\." "/") (string/replace #"-" "_") (str "/"))]
+      `(do ~@(map #(let [filename# (str root# (string/replace % #"-" "_" ) ".sparql")]
+                     `(def ~% (-> ~filename# io/resource slurp create-query)))
+                  queries))))
 
 (defn create-query
   "Return parsed query object. If query is not a string, assume object that can
