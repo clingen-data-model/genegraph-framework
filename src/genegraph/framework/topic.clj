@@ -11,13 +11,17 @@
   {:timeout 1000
    :buffer-size 10})
 
+(defn init-event [{:keys [name system-topic]} event]
+  (assoc event
+         ::event/topic name
+         ::event/completion-promise (::event/completion-promise event (promise))
+         :system-topic event))
+
 (defrecord SimpleQueueTopic [name ^BlockingQueue queue timeout]
   p/Consumer
   (poll [this]
     (when-let [e (.poll queue timeout TimeUnit/MILLISECONDS)]
-      (assoc e
-             ::event/topic name
-             ::event/completion-promise (::event/completion-promise e (promise)))))
+      (init-event this e)))
 
   p/Publisher
   (publish [this event]
@@ -51,7 +55,7 @@
   p/Consumer
   (poll [this]
     (when-let [e (.poll queue timeout TimeUnit/MILLISECONDS)]
-      (assoc e ::event/topic name)))
+      (init-event this e)))
 
   p/Lifecycle
   (start [this]
@@ -94,11 +98,3 @@
           :queue (ArrayBlockingQueue. 1)
           :state (atom {:status :stopped}))))
 
-(comment
-  (def q (p/init {:name :test-topic
-                  :type :simple-queue-topic}))
-  (p/publish q {:key "k" :value "v"})
-  (p/poll q)
-  (p/status q)
-
-  )

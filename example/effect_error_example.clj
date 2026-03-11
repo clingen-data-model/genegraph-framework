@@ -50,6 +50,8 @@
 (comment
   (def test-app (p/init test-def))
 
+  (tap> (get-in test-app [:processors :default-system-processor]))
+
   (p/start test-app)
   (p/stop test-app)
 

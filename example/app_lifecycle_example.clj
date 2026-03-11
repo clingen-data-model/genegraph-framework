@@ -172,7 +172,7 @@
   (p/start ccloud-example-app)
   (p/stop ccloud-example-app)
   
-  (tap> (p/status ccloud-example-app))
+  (tap> (get-in ccloud-example-app [:topics :publish-to-test]))
   (println "stopped")
   (tap> ccloud-example-app)
 

@@ -353,6 +353,9 @@
                                             500
                                             TimeUnit/MILLISECONDS)]
                (process-event-effects! @event-future))
+             ;; Claude has identified this as an issue. All exceptions thrown
+             ;; by processing messages will end up here, and it offers very little
+             ;; information on what's the issue with the application
              (catch Exception e
                (log/error :source ::start :record ::ParallelProcessor))))))))
   
