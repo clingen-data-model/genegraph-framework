@@ -375,7 +375,7 @@
   "Returns true if 5 or more restarts have occurred in the last 60 seconds."
   [state]
   (let [cutoff (- (System/currentTimeMillis) (* 60 1000))]
-    (>= (count (filter #(> % cutoff) (:restart-timestamps state))) 5)))
+    (>= (count (filter #(> % cutoff) (:restart-timestamps state))) 50)))
 
 (defn consumer-restart-action
   "Returns :retry, :restart, or :halt based on the exception type and restart budget."

@@ -359,21 +359,21 @@
       (is (false? (kafka/restart-budget-exceeded?
                    {:restart-timestamps (vec (repeat 10 old))}))))
 
-    (testing "false when fewer than 5 recent restarts"
+    (testing "false when fewer than 50 recent restarts"
       (is (false? (kafka/restart-budget-exceeded?
-                   {:restart-timestamps (vec (repeat 4 recent))}))))
+                   {:restart-timestamps (vec (repeat 49 recent))}))))
 
-    (testing "true when exactly 5 recent restarts"
+    (testing "true when exactly 50 recent restarts"
       (is (true? (kafka/restart-budget-exceeded?
-                  {:restart-timestamps (vec (repeat 5 recent))}))))
+                  {:restart-timestamps (vec (repeat 50 recent))}))))
 
-    (testing "true when more than 5 recent restarts"
+    (testing "true when more than 50 recent restarts"
       (is (true? (kafka/restart-budget-exceeded?
-                  {:restart-timestamps (vec (repeat 6 recent))}))))
+                  {:restart-timestamps (vec (repeat 51 recent))}))))
 
-    (testing "false when 4 recent and many old timestamps"
+    (testing "false when 49 recent and many old timestamps"
       (is (false? (kafka/restart-budget-exceeded?
-                   {:restart-timestamps (concat (repeat 4 recent)
+                   {:restart-timestamps (concat (repeat 49 recent)
                                                 (repeat 10 old))}))))))
 
 ;; ===========================================================================
@@ -411,7 +411,7 @@
 
 (deftest consumer-restart-action-test
   (let [now         (now-ms)
-        budget-full (vec (repeat 5 now))
+        budget-full (vec (repeat 50 now))
         budget-ok   []
         retriable   (proxy [RetriableException] ["test"])
         recoverable (proxy [ApplicationRecoverableException] ["test"])
@@ -541,8 +541,8 @@
   (testing "supervisor loop halts immediately when restart budget is already exceeded"
     (let [topic (make-cg-topic)
           now   (now-ms)]
-      ;; Pre-populate 5 recent restart timestamps to exhaust the budget upfront.
-      (swap! (:state topic) assoc :restart-timestamps (vec (repeat 5 now)))
+      ;; Pre-populate 50 recent restart timestamps to exhaust the budget upfront.
+      (swap! (:state topic) assoc :restart-timestamps (vec (repeat 50 now)))
       (deliver-cg-offsets! topic)
       (with-redefs [kafka/create-kafka-consumer (fn [_] (make-mock-consumer))
                     kafka/update-local-storage! (fn [_] [])
@@ -552,8 +552,8 @@
         (p/start topic)
         ;; Budget already exceeded → first throw → :halt immediately (no backoff sleep).
         (is (wait-for #(= :exception (:status @(:state topic))) 2000))
-        ;; Restart count must stay at 5 — no new restart was attempted.
-        (is (= 5 (count (:restart-timestamps @(:state topic)))))))))
+        ;; Restart count must stay at 50 — no new restart was attempted.
+        (is (= 50 (count (:restart-timestamps @(:state topic)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; KafkaReaderTopic
