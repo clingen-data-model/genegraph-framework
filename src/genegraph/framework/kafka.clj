@@ -173,7 +173,9 @@
    :status :stopped
    :initial-local-offset (promise)
    :end-offset-at-start (promise)
-   :initial-consumer-group-offset (promise)})
+   :initial-consumer-group-offset (promise)
+   :restarts 0
+   :restart-timestamps []})
 
 (defn consumer-topic-defaults [topic-def]
   (merge {:timeout 1000
@@ -369,6 +371,77 @@
   (stop-producer! topic)
   (swap! state assoc :status :stopped))
 
+(defn restart-budget-exceeded?
+  "Returns true if 5 or more restarts have occurred in the last 60 seconds."
+  [state]
+  (let [cutoff (- (System/currentTimeMillis) (* 60 1000))]
+    (>= (count (filter #(> % cutoff) (:restart-timestamps state))) 5)))
+
+(defn consumer-restart-action
+  "Returns :retry, :restart, or :halt based on the exception type and restart budget."
+  [topic e]
+  (let [outcome (:outcome (exception-outcome e))]
+    (case outcome
+      :retry-action     :retry
+      :halt-application :halt
+      (if (restart-budget-exceeded? @(:state topic)) :halt :restart))))
+
+(defn handle-consumer-exception!
+  "Logs exception, publishes to system topic, and returns the action to take."
+  [topic e]
+  (let [einfo  (exception->error-map e)
+        action (consumer-restart-action topic e)]
+    (log/error :fn ::handle-consumer-exception!
+               :outcome (:outcome einfo)
+               :action action
+               :message (:message einfo))
+    (p/system-update topic {:type            :kafka-exception
+                            :severity        (if (= :halt action) :fatal :warn)
+                            :outcome         (:outcome einfo)
+                            :exception-class (:exception einfo)
+                            :message         (:message einfo)
+                            :action          action
+                            :restart-count   (:restarts @(:state topic))})
+    action))
+
+(defn attempt-consumer-restart!
+  "Close old consumer, wait with exponential backoff, create and return a new consumer.
+  Updates :restarts and :restart-timestamps in state. Throws if creation fails."
+  [topic create-consumer-fn]
+  (let [{:keys [restarts kafka-consumer]} @(:state topic)
+        base-ms  500
+        max-ms   30000
+        interval (long (let [b (min (* base-ms (Math/pow 2 restarts)) max-ms)]
+                         (+ b (* b (Math/random) 0.2))))]
+    (swap! (:state topic)
+           #(-> %
+                (update :restarts inc)
+                (update :restart-timestamps conj (System/currentTimeMillis))
+                (assoc  :status :restarting)))
+    (try (.close kafka-consumer)
+         (catch Exception _
+           (log/info :fn ::attempt-consumer-restart!
+                     :msg "Could not close existing consumer during restart.")))
+    (log/info :fn ::attempt-consumer-restart!
+              :name (:name topic)
+              :restarts (inc restarts)
+              :msg "Restarting consumer"
+              :backoff-ms interval)
+    (p/system-update topic {:type      :kafka-consumer-restart
+                            :severity  :warn
+                            :restarts  (inc restarts)})
+    (Thread/sleep interval)
+    (let [new-consumer (create-consumer-fn)]
+      (swap! (:state topic) assoc :kafka-consumer new-consumer :status :running)
+      new-consumer)))
+
+(defn consumer-should-continue?
+  "True while the consumer supervisor loop should keep running.
+  Differs from p/running? by allowing :restarting status.
+  Returns false for :stopped, :failed, and :exception (halt path)."
+  [{:keys [state]}]
+  (not (contains? #{:stopped :failed :exception} (:status @state))))
+
 ;; Write last offset to state, check last offset before
 ;; pushing event to queue--should cover case were poll fails with
 ;; events in flight
@@ -394,27 +467,42 @@
       (.start
        (Thread.
         (fn []
-          (let [^KafkaConsumer new-consumer (create-kafka-consumer this)]
-            (try
-              (swap! state assoc :kafka-consumer new-consumer)
-              (.subscribe new-consumer
-                          [kafka-topic]
-                          (consumer-rebalance-listener this))
-              (loop [events (update-local-storage! this)]
-                (run! #(deliver-event
-                        this
-                        (assoc %
-                               ::event/topic name
-                               ::event/consumer-group kafka-consumer-group) )
-                      events)
-                (when (= :running (:status @state))
-                  (recur (poll-kafka-consumer
-                          new-consumer
-                          {::event/format (:serialization this)}))))
-              (swap! state assoc :status :stopped)
-              (.unsubscribe new-consumer)
-              (catch Exception e (p/exception this e))))))))
-  
+          (loop []
+            (when (consumer-should-continue? this)
+              (let [^KafkaConsumer new-consumer (create-kafka-consumer this)]
+                (swap! state assoc :kafka-consumer new-consumer)
+                (let [action
+                      (try
+                        (.subscribe new-consumer
+                                    [kafka-topic]
+                                    (consumer-rebalance-listener this))
+                        (loop [events (update-local-storage! this)]
+                          (run! #(deliver-event
+                                  this
+                                  (assoc %
+                                         ::event/topic name
+                                         ::event/consumer-group kafka-consumer-group))
+                                events)
+                          (when (p/running? this)
+                            (recur (poll-kafka-consumer
+                                    new-consumer
+                                    {::event/format (:serialization this)}))))
+                        (.unsubscribe new-consumer)
+                        nil
+                        (catch Exception e
+                          (handle-consumer-exception! this e)))]
+                  (case action
+                    nil     (swap! state assoc :status :stopped)
+                    :retry  (do (Thread/sleep 1000) (recur))
+                    :halt   (p/exception this (ex-info "Consumer halted after exception" {}))
+                    :restart (let [ok? (try
+                                         (attempt-consumer-restart! this #(create-kafka-consumer this))
+                                         true
+                                         (catch Exception e
+                                           (p/exception this e)
+                                           false))]
+                               (when ok? (recur))))))))))))
+
     (stop [this]
       (perform-common-shutdown-actions! this))
 
@@ -519,22 +607,44 @@
     (.start
      (Thread.
       (fn []
-        (try
-          (let [^KafkaConsumer consumer (create-local-kafka-consumer this)]
-            (swap! state assoc :kafka-consumer consumer)
-            (deliver (:end-offset-at-start @state) (end-offset consumer))
-            (while (= :running (:status @state))
-              (->> (poll-kafka-consumer
-                    consumer
-                    {::event/format (:serialization this)})
-                   (map #(assoc %
-                                ::event/topic name
-                                ::event/skip-publish-effects true))
-                   (run! #(deliver-event this %)))
-              (Thread/sleep 100))
-            (.unsubscribe consumer)
-            (swap! state assoc :status :stopped))
-          (catch Exception e (p/exception this e)))))))
+        (loop []
+          (when (consumer-should-continue? this)
+            (let [start-offset (or (:last-delivered-event-offset @state)
+                                   @(:initial-local-offset @state))
+                  ^KafkaConsumer consumer (create-local-kafka-consumer this start-offset)
+                  action
+                  (try
+                    (swap! state assoc :kafka-consumer consumer)
+                    (deliver (:end-offset-at-start @state) (end-offset consumer))
+                    (while (p/running? this)
+                      (->> (poll-kafka-consumer
+                            consumer
+                            {::event/format (:serialization this)})
+                           (map #(assoc %
+                                        ::event/topic name
+                                        ::event/skip-publish-effects true))
+                           (run! #(deliver-event this %)))
+                      (Thread/sleep 100))
+                    (.unsubscribe consumer)
+                    nil
+                    (catch Exception e
+                      (handle-consumer-exception! this e)))]
+              (case action
+                nil     (swap! state assoc :status :stopped)
+                :retry  (do (Thread/sleep 1000) (recur))
+                :halt   (p/exception this (ex-info "Consumer halted after exception" {}))
+                :restart (let [ok? (try
+                                     (attempt-consumer-restart!
+                                      this
+                                      #(create-local-kafka-consumer
+                                        this
+                                        (or (:last-delivered-event-offset @state)
+                                            @(:initial-local-offset @state))))
+                                     true
+                                     (catch Exception e
+                                       (p/exception this e)
+                                       false))]
+                           (when ok? (recur)))))))))))
 
   ;; Currently does nothing. May want to create an option to reset
   ;; local state store (when not destroying it at the same time
@@ -542,7 +652,7 @@
   p/Resetable
   (reset [this]
     )
-  
+
   (stop [this]
     (perform-common-shutdown-actions! this))
 
