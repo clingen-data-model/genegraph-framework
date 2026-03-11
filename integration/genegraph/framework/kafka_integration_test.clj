@@ -6,11 +6,15 @@
             [genegraph.framework.kafka.admin :as kafka-admin]
             [genegraph.framework.protocol :as p]
             [genegraph.framework.event :as event]
+            [genegraph.framework.topic]
             [clojure.test :refer [deftest testing is use-fixtures]])
   (:import [org.apache.kafka.clients.admin Admin NewTopic]
            [org.apache.kafka.clients.consumer KafkaConsumer]
            [org.apache.kafka.clients.producer KafkaProducer ProducerRecord]
            [org.apache.kafka.common TopicPartition]
+           [org.apache.kafka.common.errors
+            ApplicationRecoverableException
+            InvalidConfigurationException]
            [java.time Duration]
            [java.util.concurrent TimeUnit]))
 
@@ -428,3 +432,125 @@
                                          {"isolation.level" "read_committed"})]
           (is (= 0 (count records))
               "no records should be visible after transaction abort"))))))
+
+;; ---------------------------------------------------------------------------
+;; Helpers: producer error / restart tests
+;; ---------------------------------------------------------------------------
+
+(defn await-producer-status
+  "Poll (:status @(:state producer)) every 100 ms until it equals expected-status
+   or timeout-ms elapses. Returns the status reached. Throws ex-info on timeout."
+  [producer expected-status timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (let [status (:status @(:state producer))]
+        (cond
+          (= expected-status status) status
+          (> (System/currentTimeMillis) deadline)
+          (throw (ex-info "Timeout waiting for producer status"
+                          {:expected expected-status
+                           :actual   status
+                           :restarts (:restarts @(:state producer))}))
+          :else (do (Thread/sleep 100) (recur)))))))
+
+(defn drain-system-topic
+  "Return all events currently queued in the system-topic's internal queue,
+   waiting up to drain-timeout-ms for the first event to arrive."
+  [system-topic drain-timeout-ms]
+  (let [queue (:queue system-topic)]
+    (loop [collected []]
+      (if-let [e (.poll queue (if (empty? collected) drain-timeout-ms 100) TimeUnit/MILLISECONDS)]
+        (recur (conj collected e))
+        collected))))
+
+;; ---------------------------------------------------------------------------
+;; GenegraphKafkaProducer — fatal exception halts without restart
+;; ---------------------------------------------------------------------------
+
+(deftest producer-fatal-exception-halts-test
+  (testing "InvalidConfigurationException during startup sets status to :failed with no restart"
+    (let [producer (p/init {:name          :test-fatal-producer
+                            :type          :genegraph-kafka-producer
+                            :kafka-cluster local-cluster})]
+      (with-redefs [kafka/create-producer!
+                    (fn [& _]
+                      (throw (InvalidConfigurationException. "simulated fatal config error")))]
+        (p/start producer))
+      (is (= :failed (:status @(:state producer)))
+          "status should be :failed after a fatal exception")
+      (is (= 0 (:restarts @(:state producer)))
+          "no restart should have been attempted for a fatal exception"))))
+
+;; ---------------------------------------------------------------------------
+;; GenegraphKafkaProducer — restart after transient failure
+;; ---------------------------------------------------------------------------
+
+(deftest producer-restart-after-transient-failure-test
+  (testing "producer restarts and becomes :running after ApplicationRecoverableException"
+    (with-test-topic [topic-name]
+      (let [real-create! kafka/create-producer!
+            call-count   (atom 0)
+            producer     (p/init {:name          :test-restart-producer
+                                  :type          :genegraph-kafka-producer
+                                  :kafka-cluster local-cluster})]
+        ;; The first two calls to create-producer! throw a recoverable exception.
+        ;; The third call delegates to the real implementation and connects to the broker.
+        ;; p/start → create-producer! (call 1, throws) → handle-producer-exception!
+        ;;   → attempt-restart! loop:
+        ;;     iteration 1 (restarts=1): create-producer! (call 2, throws) → recur
+        ;;     iteration 2 (restarts=2): create-producer! (call 3, succeeds) → :running
+        (with-redefs [kafka/create-producer!
+                      (fn [cluster opts]
+                        (if (< (swap! call-count inc) 3)
+                          (throw (proxy [ApplicationRecoverableException] ["simulated transient"]))
+                          (real-create! cluster opts)))]
+          (p/start producer))
+        (try
+          (is (= :running (:status @(:state producer)))
+              "producer should be :running after recovery")
+          (is (= 2 (:restarts @(:state producer)))
+              "restart counter should reflect two loop iterations")
+          ;; Verify the recovered producer can actually deliver a message.
+          (let [cp (promise)]
+            (p/publish producer {::event/kafka-topic topic-name
+                                 ::event/key         "post-restart-key"
+                                 ::event/data        "post-restart-value"
+                                 :commit-promise     cp})
+            (is (true? (await-promise cp 10000))
+                "producer should be functional after restart"))
+          (finally
+            (p/stop producer)))))))
+
+;; ---------------------------------------------------------------------------
+;; GenegraphKafkaProducer — error events published to system-topic
+;; ---------------------------------------------------------------------------
+
+(deftest producer-restart-reports-to-system-topic-test
+  (testing "each recoverable failure publishes an error event to the system-topic"
+    (let [real-create! kafka/create-producer!
+          call-count   (atom 0)
+          system-topic (p/init {:name        :test-sys-topic
+                                :type        :simple-queue-topic
+                                :buffer-size 20})
+          producer     (p/init {:name          :test-sys-reporter
+                                :type          :genegraph-kafka-producer
+                                :kafka-cluster local-cluster
+                                :system-topic  system-topic})]
+      (with-redefs [kafka/create-producer!
+                    (fn [cluster opts]
+                      (if (< (swap! call-count inc) 3)
+                        (throw (proxy [ApplicationRecoverableException] ["simulated"]))
+                        (real-create! cluster opts)))]
+        (p/start producer))
+      (try
+        ;; Two failures in p/start + attempt-restart! should produce two error events.
+        ;; Allow 500 ms for any async publishing to settle before draining.
+        (let [errors (drain-system-topic system-topic 500)]
+          (is (>= (count errors) 2)
+              "at least two error events should have been published (one per failure)")
+          (is (every? #(= :test-sys-reporter (:source %)) errors)
+              "every error event should carry the producer's :name as :source")
+          (is (every? #(= :warn (:severity %)) errors)
+              "ApplicationRecoverableException maps to :warn severity"))
+        (finally
+          (p/stop producer))))))

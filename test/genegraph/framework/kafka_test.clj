@@ -123,29 +123,29 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest exception-outcome-test
-  (testing "ApplicationRecoverableException maps to :restart-client"
+  (testing "ApplicationRecoverableException maps to :restart-client with :warn severity"
     ;; ApplicationRecoverableException is abstract; proxy creates a concrete subclass.
     (let [e (proxy [ApplicationRecoverableException] ["test"])]
-      (is (= :restart-client (kafka/exception-outcome e)))))
+      (is (= {:outcome :restart-client :severity :warn} (kafka/exception-outcome e)))))
 
-  (testing "a RetriableException subclass maps to :retry-action"
+  (testing "a RetriableException subclass maps to :retry-action with :info severity"
     ;; RetriableException is abstract; proxy creates a concrete subclass.
     (let [e (proxy [RetriableException] ["test"])]
-      (is (= :retry-action (kafka/exception-outcome e)))))
+      (is (= {:outcome :retry-action :severity :info} (kafka/exception-outcome e)))))
 
-  (testing "InvalidConfigurationException maps to :halt-application"
+  (testing "InvalidConfigurationException maps to :halt-application with :fatal severity"
     (let [e (InvalidConfigurationException. "test")]
-      (is (= :halt-application (kafka/exception-outcome e)))))
+      (is (= {:outcome :halt-application :severity :fatal} (kafka/exception-outcome e)))))
 
-  (testing "an unrecognized exception type maps to :unknown-outcome"
+  (testing "an unrecognized exception type maps to :unknown with :error severity"
     (let [e (RuntimeException. "unknown")]
-      (is (= :unknown-outcome (kafka/exception-outcome e)))))
+      (is (= {:outcome :unknown :severity :error} (kafka/exception-outcome e)))))
 
   (testing "ApplicationRecoverableException is checked before RetriableException"
     ;; ApplicationRecoverableException extends RetriableException; condp instance?
     ;; checks in order so ApplicationRecoverableException must come first.
     (let [e (proxy [ApplicationRecoverableException] ["overlapping"])]
-      (is (= :restart-client (kafka/exception-outcome e))))))
+      (is (= {:outcome :restart-client :severity :warn} (kafka/exception-outcome e))))))
 
 ;; ---------------------------------------------------------------------------
 ;; topic-up-to-date?

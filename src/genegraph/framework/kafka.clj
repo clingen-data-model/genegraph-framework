@@ -16,7 +16,8 @@
             RetriableException
             InvalidConfigurationException]
            [java.time Duration]
-           [java.util.concurrent BlockingQueue ArrayBlockingQueue LinkedBlockingQueue TimeUnit]))
+           [java.util.concurrent BlockingQueue ArrayBlockingQueue LinkedBlockingQueue
+            LinkedBlockingDeque TimeUnit]))
 
 (defn create-producer! [cluster-def opts]
   (let [merged-opts (merge (:common-config cluster-def)
@@ -49,15 +50,19 @@
 
 (defn exception-outcome [e]
   (condp instance? e
-    ApplicationRecoverableException :restart-client
-    RetriableException :retry-action
-    InvalidConfigurationException :halt-application
-    :unknown-outcome))
+    ApplicationRecoverableException {:outcome :restart-client
+                                     :severity :warn}
+    RetriableException {:outcome :retry-action
+                        :severity :info}
+    InvalidConfigurationException {:outcome :halt-application
+                                   :severity :fatal}
+    {:outcome :unknown
+     :severity :error}))
 
 (defn exception->error-map [e]
-  {:exception (.getName (class e))
-   :message (.getMessage e)
-   :outcome (exception-outcome e)})
+  (assoc (exception-outcome e)
+         :message (.getMessage e)
+         :exception (.getName (class e))))
 
 (defn publish [topic event]
   (p/publish
@@ -595,14 +600,26 @@
   (:kafka-transactional-id producer))
 
 (defn running? [{:keys [state]}]
-  (not (get #{:stopped :failed} (:status @state))))
+  (not (get #{:stopped :failed :restarting} (:status @state))))
 
 (defn report-producer-error [producer error]
+  (when-let [t (:system-topic producer)]
+    (p/publish t (assoc error :source (:name producer))))
   (log/error
     :fn :report-producer-error
     :error (:error error)
     :severity (:severity error)
     :message (:message error)))
+
+(declare attempt-restart!)
+
+(defn handle-producer-exception! [{:keys [state] :as producer} exception]
+  (let [einfo (exception->error-map exception)]
+    (report-producer-error producer einfo)
+    (case (:outcome einfo)
+      :halt-application (swap! state assoc :status :failed)
+      :restart-client (attempt-restart! producer)
+      "do nothing")))
 
 (defn should-execute-commit? [{:keys [state queue] :as producer}]
   (and (transactional-producer? producer)
@@ -649,10 +666,7 @@
              :uncommitted-records []
              :transaction-status :committed-transaction)
       (catch Exception e
-        (report-producer-error producer
-                               {:error :commit-exception
-                                :severity :critical
-                                :message (.getMessage e)})))))
+        (handle-producer-exception! producer e)))))
 
 (defn deliver-commit-promise [event value]
   (when-let [p (:commit-promise event)]
@@ -681,10 +695,7 @@
       (.beginTransaction (:producer @state))
       (swap! state assoc :transaction-status :in-transaction)
       (catch Exception e
-        (report-producer-error producer
-                               {:error :error-beginning-transaction
-                                :severity :critical
-                                :message (.getMessage e)})))))
+        (handle-producer-exception! producer e)))))
 
 (defn send-record [{:keys [state] :as genegraph-producer} event]
   (when (transactional-producer? genegraph-producer)
@@ -714,8 +725,7 @@
     (swap! state assoc-in [:new-offsets [consumer-group kafka-topic]] offset)))
 
 (defn start-publish-thread! [{:keys [queue state] :as producer}]
-  (.start
-   (Thread.
+  (let [t (Thread/startVirtualThread
     (fn []
       (log/info :fn ::start-publish-thread :msg "publish thread started")
       (while (running? producer)
@@ -729,16 +739,77 @@
               :offset (update-offsets producer (:event e))
               (send-record producer e))
             (catch Exception e
-              (report-producer-error producer
-                                     {:error :exception-sending-event
-                                      :severity :critical
-                                      :message (.getMessage e)})))))
-      (log/info :fn ::start-publish-thread :msg "publish thread stopped" )))))
+              (handle-producer-exception! producer e)))))
+      (log/info :fn ::start-publish-thread :msg "publish thread stopped" )))]
+    (swap! state assoc :publish-thread t)))
 
-(defn restart-kafka-producer! [{:keys [state] :as genegraph-producer}]
-  (swap! state assoc :status :restarting)
-  (.close (:producer @state))
-  )
+(defn resend-uncommitted-records!
+  "In case the producers is restarted with transactional events in flight.
+   Resend the events as needed."
+  [{:keys [state] :as genegraph-producer}]
+  (let [{:keys [uncommitted-records]} @state]
+    (when (seq uncommitted-records)
+      (try 
+        (run! #(send-record genegraph-producer %) uncommitted-records)
+        (commit-transaction-if-needed! genegraph-producer)
+        (catch Exception e
+          (handle-producer-exception! genegraph-producer e))))))
+
+(defn start-producer!
+  "Create a new Kafka producer and start the publish thread. Throws on failure."
+  [{:keys [state kafka-cluster kafka-transactional-id name] :as genegraph-producer}]
+  (let [p (create-producer!
+           kafka-cluster
+           (cond-> {"max.request.size" (int (* 1024 1024 10))}
+             kafka-transactional-id (assoc "transactional.id" kafka-transactional-id)
+             (keyword? name) (assoc "client.id" (clojure.core/name name))))]
+    (swap! state
+           assoc
+           :producer p
+           :status :running
+           :transaction-status :not-in-transaction)
+    (start-publish-thread! genegraph-producer)))
+
+(defn attempt-restart!
+  "Attempt to restart the producer in case of error. Uses an iterative loop
+  to avoid stack overflow during repeated restart attempts. No limit on restarts
+  is imposed; the expectation is that the Kafka cluster will eventually recover."
+  [{:keys [state] :as genegraph-producer}]
+  (loop []
+    (swap! state #(-> %
+                      (update :restarts inc)
+                      (assoc :status :restarting)))
+    (let [base-ms 500
+          max-ms (* 1000 60 5)            ; 5 minutes
+          {:keys [publish-thread restarts producer]} @state
+          base-interval (min (* base-ms (Math/pow 2 restarts)) max-ms)
+          jitter-interval (long (+ base-interval
+                                   (* base-interval (Math/random) 0.2)))]
+      (try (.close producer)
+           (catch Exception _
+             (log/info :fn ::attempt-restart
+                       :msg "Could not close existing producer during restart.")))
+      (try
+        (.interrupt publish-thread)
+        (catch Exception _
+          (log/info :fn ::attempt-restart
+                    :msg "Could not interrupt publish thread.")))
+      (log/info :fn ::attempt-restart
+                :name (:name genegraph-producer)
+                :restarts restarts
+                :msg "Restarting producer")
+      (Thread/sleep jitter-interval)
+      (let [outcome (try
+                      (start-producer! genegraph-producer)
+                      :success
+                      (catch Exception e
+                        (let [einfo (exception->error-map e)]
+                          (report-producer-error genegraph-producer einfo)
+                          (:outcome einfo))))]
+        (case outcome
+          :success nil
+          :halt-application (swap! state assoc :status :failed)
+          (recur))))))
 
 (defrecord GenegraphKafkaProducer
     [state
@@ -771,21 +842,9 @@
     p/Lifecycle
     (start [this]
       (try
-        (let [p (create-producer!
-                 kafka-cluster
-                 (cond-> {"max.request.size" (int (* 1024 1024 10))}
-                   kafka-transactional-id (assoc "transactional.id" kafka-transactional-id)
-                   (keyword? name) (assoc "client.id" (clojure.core/name name))))]
-          (swap! state
-                 assoc
-                 :producer p
-                 :status :running)
-          (start-publish-thread! this))
+        (start-producer! this)
         (catch Exception e
-          (report-producer-error this
-                                 {:error :exception-starting-producer
-                                  :severity :critical
-                                  :message (.getMessage e)}))))
+          (handle-producer-exception! this e))))
     
     (stop [this]
       (.close (:producer @state))
