@@ -554,3 +554,253 @@
               "ApplicationRecoverableException maps to :warn severity"))
         (finally
           (p/stop producer))))))
+
+;; ---------------------------------------------------------------------------
+;; Helpers: consumer restart tests
+;; ---------------------------------------------------------------------------
+
+(defn await-topic-status
+  "Poll :status in the topic state atom until it is in expected-statuses (a set),
+   or throw ex-info after timeout-ms."
+  [topic expected-statuses timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (let [status (:status @(:state topic))]
+        (cond
+          (contains? expected-statuses status) status
+          (> (System/currentTimeMillis) deadline)
+          (throw (ex-info "Timeout waiting for topic status"
+                          {:expected expected-statuses
+                           :actual   status}))
+          :else (do (Thread/sleep 50) (recur)))))))
+
+(defn await-restart-count
+  "Poll :restarts in the topic state atom until >= expected-count,
+   or throw ex-info after timeout-ms."
+  [topic expected-count timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (let [restarts (:restarts @(:state topic))]
+        (cond
+          (>= restarts expected-count) restarts
+          (> (System/currentTimeMillis) deadline)
+          (throw (ex-info "Timeout waiting for restart count"
+                          {:expected expected-count
+                           :actual   restarts}))
+          :else (do (Thread/sleep 50) (recur)))))))
+
+;; ---------------------------------------------------------------------------
+;; KafkaConsumerGroupTopic — restart on recoverable exception
+;; ---------------------------------------------------------------------------
+
+(deftest cgt-restart-on-recoverable-exception-test
+  (testing "supervisor restarts once after ApplicationRecoverableException on first poll"
+    (with-test-topic [topic-name]
+      (produce-raw! topic-name [["k0" "v0"] ["k1" "v1"] ["k2" "v2"] ["k3" "v3"] ["k4" "v4"]])
+      (let [real-poll  kafka/poll-kafka-consumer
+            call-count (atom 0)
+            t          (p/init {:name                 :test-cgt-restart
+                                :type                 :kafka-consumer-group-topic
+                                :kafka-cluster        local-cluster
+                                :kafka-topic          topic-name
+                                :kafka-consumer-group (unique-cg-name)
+                                :timeout              200})]
+        (p/set-offset! t nil)
+        (with-redefs [kafka/poll-kafka-consumer
+                      (fn [consumer opts]
+                        (if (= 1 (swap! call-count inc))
+                          (throw (proxy [ApplicationRecoverableException] ["simulated transient"]))
+                          (real-poll consumer opts)))]
+          (p/start t)
+          (try
+            (await-restart-count t 1 10000)
+            (let [events (poll-n-events t 5 15000)]
+              (is (= 1 (:restarts @(:state t)))
+                  "restart counter should be 1")
+              (is (= 5 (count events))
+                  "all 5 events should arrive after restart")
+              (is (= #{"k0" "k1" "k2" "k3" "k4"}
+                     (set (map ::event/key events)))
+                  "all 5 keys should be present")
+              (deliver-all-cps! events))
+            (finally
+              (p/stop t))))))))
+
+;; ---------------------------------------------------------------------------
+;; KafkaConsumerGroupTopic — halt on InvalidConfigurationException
+;; ---------------------------------------------------------------------------
+
+(deftest cgt-halt-on-invalid-config-test
+  (testing "InvalidConfigurationException during poll halts the supervisor with status :exception"
+    (with-test-topic [topic-name]
+      (let [t (p/init {:name                 :test-cgt-halt
+                       :type                 :kafka-consumer-group-topic
+                       :kafka-cluster        local-cluster
+                       :kafka-topic          topic-name
+                       :kafka-consumer-group (unique-cg-name)
+                       :timeout              200})]
+        (p/set-offset! t nil)
+        (with-redefs [kafka/poll-kafka-consumer
+                      (fn [& _]
+                        (throw (InvalidConfigurationException. "simulated fatal config error")))]
+          (p/start t)
+          (try
+            (await-topic-status t #{:exception} 10000)
+            (is (= :exception (:status @(:state t)))
+                "status should be :exception after fatal config error")
+            (is (= 0 (:restarts @(:state t)))
+                "no restart should have been attempted for a fatal exception")
+            (finally
+              (p/stop t))))))))
+
+;; ---------------------------------------------------------------------------
+;; KafkaConsumerGroupTopic — halt when restart budget exceeded
+;; ---------------------------------------------------------------------------
+
+(deftest cgt-halt-on-budget-exceeded-test
+  (testing "supervisor halts when restart budget (50 restarts in 60s) is exceeded"
+    (with-test-topic [topic-name]
+      (let [t (p/init {:name                 :test-cgt-budget
+                       :type                 :kafka-consumer-group-topic
+                       :kafka-cluster        local-cluster
+                       :kafka-topic          topic-name
+                       :kafka-consumer-group (unique-cg-name)
+                       :timeout              200})]
+        ;; Pre-populate 50 recent restart timestamps to saturate the budget.
+        (swap! (:state t)
+               update :restart-timestamps
+               into (repeat 50 (System/currentTimeMillis)))
+        (p/set-offset! t nil)
+        (with-redefs [kafka/poll-kafka-consumer
+                      (fn [& _]
+                        (throw (proxy [ApplicationRecoverableException] ["simulated"])))]
+          (p/start t)
+          (try
+            (await-topic-status t #{:exception} 10000)
+            (is (= :exception (:status @(:state t)))
+                "status should be :exception once budget is exhausted")
+            (finally
+              (p/stop t))))))))
+
+;; ---------------------------------------------------------------------------
+;; KafkaReaderTopic — restart on recoverable exception
+;; ---------------------------------------------------------------------------
+
+(deftest reader-restart-on-recoverable-exception-test
+  (testing "supervisor restarts once after ApplicationRecoverableException on first poll"
+    (with-test-topic [topic-name]
+      (produce-raw! topic-name [["rk0" "rv0"] ["rk1" "rv1"] ["rk2" "rv2"]
+                                ["rk3" "rv3"] ["rk4" "rv4"]])
+      (let [real-poll  kafka/poll-kafka-consumer
+            call-count (atom 0)
+            t          (p/init {:name          :test-reader-restart
+                                :type          :kafka-reader-topic
+                                :kafka-cluster local-cluster
+                                :kafka-topic   topic-name
+                                :timeout       200})]
+        (p/set-offset! t 0)
+        (with-redefs [kafka/poll-kafka-consumer
+                      (fn [consumer opts]
+                        (if (= 1 (swap! call-count inc))
+                          (throw (proxy [ApplicationRecoverableException] ["simulated transient"]))
+                          (real-poll consumer opts)))]
+          (p/start t)
+          (try
+            (await-restart-count t 1 10000)
+            (let [events (poll-n-events t 5 15000)]
+              (is (= 1 (:restarts @(:state t)))
+                  "restart counter should be 1")
+              (is (= 5 (count events))
+                  "all 5 events should arrive after restart")
+              (is (every? ::event/skip-publish-effects events)
+                  "all reader-topic events must have skip-publish-effects true")
+              (is (= #{"rk0" "rk1" "rk2" "rk3" "rk4"}
+                     (set (map ::event/key events)))
+                  "all 5 keys should be present")
+              (deliver-all-cps! events))
+            (finally
+              (p/stop t))))))))
+
+;; ---------------------------------------------------------------------------
+;; KafkaReaderTopic — halt on InvalidConfigurationException
+;; ---------------------------------------------------------------------------
+
+(deftest reader-halt-on-invalid-config-test
+  (testing "InvalidConfigurationException during poll halts the supervisor with status :exception"
+    (with-test-topic [topic-name]
+      (let [t (p/init {:name          :test-reader-halt
+                       :type          :kafka-reader-topic
+                       :kafka-cluster local-cluster
+                       :kafka-topic   topic-name
+                       :timeout       200})]
+        (p/set-offset! t 0)
+        (with-redefs [kafka/poll-kafka-consumer
+                      (fn [& _]
+                        (throw (InvalidConfigurationException. "simulated fatal config error")))]
+          (p/start t)
+          (try
+            (await-topic-status t #{:exception} 10000)
+            (is (= :exception (:status @(:state t)))
+                "status should be :exception after fatal config error")
+            (is (= 0 (:restarts @(:state t)))
+                "no restart should have been attempted for a fatal exception")
+            (finally
+              (p/stop t))))))))
+
+;; ---------------------------------------------------------------------------
+;; KafkaReaderTopic — post-restart resumes from last delivered offset
+;; ---------------------------------------------------------------------------
+
+(deftest reader-post-restart-resumes-from-last-offset-test
+  (testing "after restart, reader seeks to last-delivered-event-offset, not initial offset"
+    ;; Strategy:
+    ;;  1. Produce 10 events (offsets 0-9).
+    ;;  2. Start reader at offset 0.
+    ;;  3. Consume 5 events via p/poll — this updates :last-delivered-event-offset in state.
+    ;;  4. Trigger an ApplicationRecoverableException on the next Kafka poll.
+    ;;  5. After restart, the reader should seek to last-delivered-event-offset, NOT offset 0.
+    ;;     If it incorrectly restarted from 0, events with offsets < last-delivered-event-offset
+    ;;     would appear in the queue, failing the assertion below.
+    (with-test-topic [topic-name]
+      (produce-raw! topic-name (mapv (fn [i] [(str "k" i) (str "v" i)]) (range 10)))
+      (let [real-poll  kafka/poll-kafka-consumer
+            throw-next (atom false)
+            t          (p/init {:name          :test-reader-offset-resume
+                                :type          :kafka-reader-topic
+                                :kafka-cluster local-cluster
+                                :kafka-topic   topic-name
+                                :timeout       200})]
+        (p/set-offset! t 0)
+        (with-redefs [kafka/poll-kafka-consumer
+                      (fn [consumer opts]
+                        (if @throw-next
+                          (do (reset! throw-next false)
+                              (throw (proxy [ApplicationRecoverableException] ["simulated"])))
+                          (real-poll consumer opts)))]
+          (p/start t)
+          (try
+            ;; Step 3: consume 5 events via p/poll (updates :last-delivered-event-offset).
+            (let [pre-events (loop [collected [] deadline (+ (System/currentTimeMillis) 10000)]
+                               (if (or (= 5 (count collected))
+                                       (> (System/currentTimeMillis) deadline))
+                                 collected
+                                 (if-let [ev (p/poll t)]
+                                   (recur (conj collected ev) deadline)
+                                   (recur collected deadline))))]
+              (is (= 5 (count pre-events))
+                  "should consume 5 events before triggering restart")
+              (let [pre-restart-offset (:last-delivered-event-offset @(:state t))]
+                (is (some? pre-restart-offset)
+                    "last-delivered-event-offset must be set after p/poll calls")
+                ;; Step 4: trigger the exception on the next Kafka poll.
+                (reset! throw-next true)
+                (await-restart-count t 1 10000)
+                ;; Step 5: drain the queue after the restart settles.
+                (Thread/sleep 500)
+                (let [post-events (poll-n-events t 10 5000)]
+                  (is (every? #(>= (::event/offset %) pre-restart-offset) post-events)
+                      "post-restart events must not have offset < last-delivered-event-offset")
+                  (deliver-all-cps! pre-events)
+                  (deliver-all-cps! post-events))))
+            (finally
+              (p/stop t))))))))

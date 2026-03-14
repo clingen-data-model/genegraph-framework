@@ -81,3 +81,7 @@ Keys are encoded from Clojure types: `bytes` → raw; `String`/`Keyword` → 64-
 ### Examples
 
 The `example/` directory contains runnable examples for Confluent Cloud, full app lifecycle, HTTP servers, parallel processors, Kafka transactions, and more. Consult these before adding new features.
+
+### Error handling
+
+The framework should manage the connection to Apache Kafka, including restarting the clients as necessary. Other types of error handling, including reporting failed messages to a dead letter queue are important, but are the responsibility of client applications.
