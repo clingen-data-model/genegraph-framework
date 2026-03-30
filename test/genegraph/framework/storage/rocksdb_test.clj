@@ -46,8 +46,8 @@
   (testing "different strings produce different bytes"
     (is (not (bytes= (rocksdb/k->bytes "hello") (rocksdb/k->bytes "world")))))
 
-  (testing "string key is encoded as exactly 8 bytes (XX3 hash)"
-    (is (= 8 (alength (rocksdb/k->bytes "any-string"))))))
+  (testing "string key is encoded as exactly 16 bytes (XX3-128 hash)"
+    (is (= 16 (alength (rocksdb/k->bytes "any-string"))))))
 
 (deftest long-key-encoding-test
   (testing "long key is encoded as exactly 8 bytes (big-endian)"
@@ -82,9 +82,9 @@
       (is (identical? raw (rocksdb/k->bytes raw))))))
 
 (deftest sequential-key-encoding-test
-  (testing "sequential key is encoded as 8 bytes per element"
-    (is (= 16 (alength (rocksdb/k->bytes [:a :b]))))
-    (is (= 24 (alength (rocksdb/k->bytes [:a :b :c])))))
+  (testing "keyword elements are encoded as 16 bytes each (XX3-128 hash)"
+    (is (= 32 (alength (rocksdb/k->bytes [:a :b]))))
+    (is (= 48 (alength (rocksdb/k->bytes [:a :b :c])))))
 
   (testing "element order matters — [:a :b] differs from [:b :a]"
     (is (not (bytes= (rocksdb/k->bytes [:a :b])
@@ -111,8 +111,9 @@
   (testing "last 8 bytes are incremented by 1"
     (let [k          (rocksdb/k->bytes [:a :b])
           end        (rocksdb/prefix-range-end k)
-          suffix-k   (Longs/fromByteArray (Arrays/copyOfRange k 8 16))
-          suffix-end (Longs/fromByteArray (Arrays/copyOfRange end 8 16))]
+          len        (alength k)
+          suffix-k   (Longs/fromByteArray (Arrays/copyOfRange k (- len 8) len))
+          suffix-end (Longs/fromByteArray (Arrays/copyOfRange end (- len 8) len))]
       (is (= (inc suffix-k) suffix-end))))
 
   (testing "range-end is lexicographically greater than the input key"

@@ -9,13 +9,19 @@
            java.nio.file.Path
            [java.io ByteArrayOutputStream File]
            [java.nio ByteBuffer]
-           [net.openhft.hashing LongHashFunction]
+           [net.openhft.hashing LongTupleHashFunction]
            [com.google.common.primitives Longs]))
 
-(defn k->long [k]
-  (if (instance? Long k)
-    k
-    (.hashBytes (LongHashFunction/xx3) (.getBytes (str k)))))
+(def ^:private ^LongTupleHashFunction xx128 (LongTupleHashFunction/xx128))
+
+(defn k->hash-bytes
+  "Hash a non-Long key to a 16-byte array using XX3-128."
+  [k]
+  (let [h  (.hashBytes xx128 (.getBytes (str k)))
+        bb (ByteBuffer/allocate 16)]
+    (.putLong bb (aget h 0))
+    (.putLong bb (aget h 1))
+    (.array bb)))
 
 (def array-of-bytes-type (Class/forName "[B"))
 
@@ -31,32 +37,32 @@
   KeyBytes
   {:k->bytes identity})
 
-;; 2) String -- 64 bit hashed value is desired
-;; which can be incorporated into a sequence of key values
+;; 2) String -- 128-bit hashed value encoded as 16 bytes
 (extend String
   KeyBytes
-  {:k->bytes (fn [x]
-               (Longs/toByteArray (k->long x)))})
+  {:k->bytes k->hash-bytes})
 
-;; 2) Long -- An ordered key is deisred
+;; 3) Long -- An ordered key is desired
 ;; for the purpose of range scans
 (extend Long
   KeyBytes
   {:k->bytes (fn [x]
                (Longs/toByteArray x))})
 
-;; 3) Keyword -- Same as String
+;; 4) Keyword -- Same as String
 (extend clojure.lang.Keyword
   KeyBytes
   {:k->bytes (fn [x] (k->bytes (str x)))})
 
-;; 4) Sequence -- append individual keys
+;; 5) Sequence -- concatenate k->bytes of each element
 (extend clojure.lang.Sequential
   KeyBytes
   {:k->bytes (fn [x]
-               (let [bs (ByteBuffer/allocate (* 8 (count x)))]
-                 (run! #(.putLong bs (k->long %)) x)
-                 (.array bs)))})
+               (let [parts (mapv k->bytes x)
+                     total (reduce + 0 (map alength parts))
+                     bb    (ByteBuffer/allocate total)]
+                 (run! #(.put bb ^bytes %) parts)
+                 (.array bb)))})
 
 (defn open [path]
   (io/make-parents path)
