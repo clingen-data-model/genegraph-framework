@@ -4,8 +4,7 @@
   among other purposes."
   (:require [genegraph.framework.storage.rdf.names :as names]
             [clojure.spec.alpha :as spec])
-  (:import [net.openhft.hashing LongHashFunction]
-           [com.google.common.primitives Longs]
+  (:import [net.openhft.hashing LongTupleHashFunction]
            [java.nio ByteBuffer]
            [java.util Base64]))
 
@@ -64,26 +63,34 @@
     "https://genegraph.clinicalgenome.org/r/nil"
     (attr->hashable-primitive attr)))
 
+(def ^:private long-array-type (class (long-array 0)))
+
 (defn hash-buffer-length [hashable-attrs]
   (reduce (fn [a attr]
-            (+ a (if (instance? Long attr)
-                   Long/BYTES
-                   (count (.getBytes attr)))))
+            (+ a (cond
+                   (instance? Long attr)          Long/BYTES
+                   (= (class attr) long-array-type) (* 2 Long/BYTES)
+                   :else                           (count (.getBytes attr)))))
           0
           hashable-attrs))
 
 (defn attrs->hash [attrs]
   (let [bb (ByteBuffer/allocate (hash-buffer-length attrs))]
-    (run! #(if (instance? Long %)
-             (.putLong bb %)
-             (.put bb (.getBytes %)))
+    (run! #(cond
+             (instance? Long %)              (.putLong bb %)
+             (= (class %) long-array-type)  (do (.putLong bb (aget ^longs % 0))
+                                                (.putLong bb (aget ^longs % 1)))
+             :else                           (.put bb (.getBytes ^String %)))
           attrs)
-    (.hashBytes (LongHashFunction/xx3) (.array bb))))
+    (.hashBytes (LongTupleHashFunction/xx128) (.array bb))))
 
-(defn hash->id [h]
-  (.encodeToString
-   (.withoutPadding (Base64/getUrlEncoder))
-   (Longs/toByteArray h)))
+(defn hash->id [^longs h]
+  (let [bb (ByteBuffer/allocate (* 2 Long/BYTES))]
+    (.putLong bb (aget h 0))
+    (.putLong bb (aget h 1))
+    (.encodeToString
+     (.withoutPadding (Base64/getUrlEncoder))
+     (.array bb))))
 
 (defn iri [o]
   (->> (defining-attributes o)

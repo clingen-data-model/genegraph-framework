@@ -1,0 +1,307 @@
+#+TITLE: RocksDB Performance Analysis
+#+DATE: 2026-03-30
+
+* Overview
+
+This document evaluates =src/genegraph/framework/storage/rocksdb.clj= for
+performance improvement opportunities and assesses the practical value of each.
+The library is used as backing storage for Kafka offset tracking and as a
+key-value store for application state rebuilt by replaying Kafka topics.
+
+The two dominant workloads are:
+- *Bulk writes* during topic replay (rebuilding local state from Kafka)
+- *Point reads* during normal event processing
+
+-----
+
+* High-Value Improvements
+
+** 1. No WriteBatch support
+
+*What the code does*
+
+Every call to =rocks-write!= issues an individual =.put= to RocksDB:
+
+#+BEGIN_SRC clojure
+(defn rocks-write! [^RocksDB db k v]
+  (.put db
+        (k->bytes k)
+        (nippy/fast-freeze v)))
+#+END_SRC
+
+Each individual put involves a full write to the RocksDB memtable with the
+associated mutex acquisition and WAL write.
+
+*Why it matters*
+
+During Kafka topic replay the framework calls =rocks-write!= once per event,
+potentially thousands of times in rapid succession. RocksDB's =WriteBatch=
+groups multiple mutations into a single atomic, serialized operation. The batch
+bypasses per-write mutex contention and reduces the number of WAL syncs from N
+to 1 for N writes. Measured throughput improvements in RocksDB benchmarks for
+batch vs. single-write are typically 5–20x for sequential workloads.
+
+The current =IndexedWrite= protocol does not expose a batch abstraction, so
+adding =WriteBatch= support would require either a new protocol (e.g.,
+=BatchedWrite=) or a higher-arity write variant that accepts a batch handle.
+
+*Applicability*
+
+High. The topic replay path is exactly the scenario where this matters most.
+Offset commit writes (called once per Kafka poll cycle) would not benefit
+significantly.
+
+-----
+
+** 2. Bloom filters not configured
+
+*What the code does*
+
+=open= creates a =RocksDB= with only LZ4 compression set:
+
+#+BEGIN_SRC clojure
+(defn open [path]
+  (io/make-parents path)
+  (RocksDB/open (doto (Options.)
+                  (.setCreateIfMissing true)
+                  (.setCompressionType CompressionType/LZ4_COMPRESSION)) path))
+#+END_SRC
+
+No =BlockBasedTableConfig= with a =BloomFilter= is set, so RocksDB uses its
+default table format with no bloom filter.
+
+*Why it matters*
+
+For point reads (=rocks-get=), RocksDB must check each SST file level to
+determine whether a key exists. Without bloom filters, a negative lookup (key
+not found) requires reading index blocks from every overlapping SST file, which
+means multiple disk I/Os. With a bloom filter, the negative lookup is answered
+in memory with ~1% false-positive rate.
+
+In Kafka offset tracking, =retrieve-offset= is called at startup for each topic
+to determine the local offset. If the topic has never been stored (first run),
+that is a negative lookup. More importantly, if application code reads keys that
+are frequently absent, the cost compounds.
+
+A bloom filter can be enabled by adding a =BlockBasedTableConfig= to the
+=Options= at open time. This is purely additive and backward-compatible with
+existing data files.
+
+*Applicability*
+
+Medium-high. Benefit scales with the ratio of negative to positive point reads
+and with dataset size. For a freshly started service replaying a large topic,
+the majority of reads during state reconstruction may be positive, limiting
+bloom filter benefit to the normal-operation phase.
+
+-----
+
+* Medium-Value Improvements
+
+** 3. LongHashFunction/xx3 called per invocation
+
+*What the code does*
+
+#+BEGIN_SRC clojure
+(defn k->long [k]
+  (if (instance? Long k)
+    k
+    (.hashBytes (LongHashFunction/xx3) (.getBytes (str k)))))
+#+END_SRC
+
+=(LongHashFunction/xx3)= is called every time a non-Long key is encoded. This
+is invoked on every read, write, delete, and scan that uses a =String=,
+=Keyword=, or =Sequential= key.
+
+*Why it matters*
+
+The =zero-allocation-hashing= library is designed for zero allocation, and
+=xx3= likely returns a shared singleton via a static factory. If so, the cost
+is only the static method dispatch on each call, which is negligible. If it
+allocates a new instance (which the naming convention does not guarantee either
+way), caching it as a =def= would eliminate that allocation entirely:
+
+#+BEGIN_SRC clojure
+(def ^LongHashFunction xx3 (LongHashFunction/xx3))
+#+END_SRC
+
+*Applicability*
+
+Low to medium depending on whether the factory allocates. Given that key
+encoding happens on every storage operation, if allocation does occur, this is
+worth fixing. It is a one-line change with no downside.
+
+-----
+
+** 4. Block cache not sized
+
+*What the code does*
+
+=open= does not configure a =Cache= object. RocksDB defaults to an 8 MB block
+cache per column family.
+
+*Why it matters*
+
+8 MB is very small for applications storing megabytes to gigabytes of data. A
+larger block cache dramatically reduces read I/O once the working set fits in
+memory. For the framework's typical use case — a service processing a specific
+Kafka topic and maintaining a RocksDB of derived state — the working set may be
+predictable and sized appropriately.
+
+Block cache size should be tuned to available JVM heap. The =:dev= JVM options
+already set =-XX:MaxRAMPercentage=50= and =-XX:+UseZGC=, suggesting that heap
+utilization is already carefully managed.
+
+*Applicability*
+
+Medium. The right cache size is workload-dependent and cannot be determined
+statically. This is a configuration concern rather than a code defect, but
+exposing a =:block-cache-bytes= option in the =RocksDBInstance= definition map
+(alongside existing =:path=, =:name=) would allow callers to tune it.
+
+-----
+
+** 5. No multi-get support
+
+*What the code does*
+
+=rocks-get= issues a single =.get= call per key. There is no batch read path.
+
+*Why it matters*
+
+RocksDB exposes =multiGetAsList= (available since RocksDB 6.x, present in
+10.2.1), which fetches multiple keys in a single call. For processing patterns
+that need to enrich an event by reading several independent keys, this can
+reduce per-event overhead.
+
+*Applicability*
+
+Low to medium. The current interceptor model processes one event at a time and
+reads keys on demand. There is no structural point in the framework where
+multiple independent keys are batched for lookup. This improvement would require
+changes to the event/interceptor model to be useful, making it a prerequisite
+to other work rather than a standalone fix.
+
+-----
+
+* Low-Value Improvements
+
+** 6. =case= dispatch inside range-get loop
+
+*What the code does*
+
+#+BEGIN_SRC clojure
+(loop [v (transient [])]
+  (if (.isValid iter)
+    (let [v1 (conj! v
+                    (case return
+                      :key (.key iter)
+                      :ref (->RocksRef db (.key iter))
+                      (nippy/fast-thaw (.value iter))))]
+      (.next iter)
+      (recur v1))
+    (persistent! v)))
+#+END_SRC
+
+The =case return= dispatch is evaluated on every iteration even though =return=
+is invariant across the loop.
+
+*Why it matters*
+
+For large scans returning thousands of entries, this is N redundant constant
+dispatches. Hoisting the dispatch outside the loop (using a local function
+chosen before looping) would eliminate this overhead entirely.
+
+In practice, the Nippy deserialization cost dominates per-element overhead for
+the default (value) case, making this micro-optimization difficult to measure.
+
+*Applicability*
+
+Low. The code is clear as written. Hoisting would add complexity for a gain
+measurable only in large scans, and Nippy deserialization remains the bottleneck
+in the default path regardless.
+
+-----
+
+** 7. =Options= object not closed in =open=
+
+*What the code does*
+
+#+BEGIN_SRC clojure
+(defn open [path]
+  (io/make-parents path)
+  (RocksDB/open (doto (Options.)
+                  (.setCreateIfMissing true)
+                  (.setCompressionType CompressionType/LZ4_COMPRESSION)) path))
+#+END_SRC
+
+The =Options= object wraps native memory (it extends =RocksObject=) and is
+never closed.
+
+*Why it matters*
+
+=Options= implements =AutoCloseable=. After =RocksDB.open= completes, the
+simple options used here (compression type, create-if-missing) are no longer
+referenced by the DB instance. The native memory is small and will be released
+eventually by the RocksDB JNI finalizer, but it is semantically a resource
+leak.
+
+Using =with-open= around the options construction would eliminate this:
+
+#+BEGIN_SRC clojure
+(with-open [opts (doto (Options.)
+                   (.setCreateIfMissing true)
+                   (.setCompressionType CompressionType/LZ4_COMPRESSION))]
+  (RocksDB/open opts path))
+#+END_SRC
+
+*Applicability*
+
+Low for correctness impact (the leak is tiny and bounded to the number of
+opens), but it is a clean fix. The caveat is that some =Options= subfields
+(custom comparators, merge operators) must outlive the DB; none are used here,
+so closing is safe.
+
+-----
+
+** 8. =String.getBytes()= uses platform default charset
+
+*What the code does*
+
+#+BEGIN_SRC clojure
+(.hashBytes (LongHashFunction/xx3) (.getBytes (str k)))
+#+END_SRC
+
+=.getBytes= with no argument uses the platform default charset.
+
+*Why it matters*
+
+On virtually all modern JVMs the default charset is UTF-8, so this is not a
+practical bug. However, the behavior is technically platform-dependent. Passing
+=java.nio.charset.StandardCharsets/UTF_8= makes the encoding explicit and
+marginally faster (no charset lookup).
+
+*Applicability*
+
+Very low. Cosmetic / correctness hygiene. Not a performance concern in practice.
+
+-----
+
+* Summary Table
+
+| # | Finding                              | Value  | Effort | Notes                                      |
+|---+--------------------------------------+--------+--------+--------------------------------------------|
+| 1 | WriteBatch for bulk writes           | High   | Medium | New protocol or arity; big replay win      |
+| 2 | Bloom filters on block cache         | Medium | Low    | One-time =open= change; additive           |
+| 3 | Cache =LongHashFunction/xx3=         | Medium | Trivial| One-line def; depends on whether it allocs |
+| 4 | Configurable block cache size        | Medium | Low    | Expose as option in def map                |
+| 5 | Multi-get support                    | Low    | Medium | Requires interceptor model changes         |
+| 6 | Hoist =case= out of scan loop        | Low    | Low    | Dominated by Nippy cost                   |
+| 7 | Close =Options= after =open=         | Low    | Trivial| Clean fix; tiny native memory leak         |
+| 8 | Explicit UTF-8 charset in =.getBytes=| None   | Trivial| Cosmetic                                   |
+
+*Recommended priority*: Items 1 (WriteBatch) and 2 (bloom filters) deliver the
+most practical value for the framework's Kafka replay workload. Item 3 is a
+trivial one-line improvement worth doing immediately. Item 7 is a clean
+correctness fix. Items 4–6 should wait until profiling identifies them as actual
+bottlenecks.

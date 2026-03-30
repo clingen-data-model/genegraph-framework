@@ -404,6 +404,13 @@
                             :restart-count   (:restarts @(:state topic))})
     action))
 
+(defn consumer-should-continue?
+  "True while the consumer supervisor loop should keep running.
+  Differs from p/running? by allowing :restarting status.
+  Returns false for :stopped, :failed, and :exception (halt path)."
+  [{:keys [state]}]
+  (not (contains? #{:stopped :failed :exception} (:status @state))))
+
 (defn attempt-consumer-restart!
   "Close old consumer, wait with exponential backoff, create and return a new consumer.
   Updates :restarts and :restart-timestamps in state. Throws if creation fails."
@@ -431,16 +438,10 @@
                             :severity  :warn
                             :restarts  (inc restarts)})
     (Thread/sleep interval)
-    (let [new-consumer (create-consumer-fn)]
-      (swap! (:state topic) assoc :kafka-consumer new-consumer :status :running)
-      new-consumer)))
-
-(defn consumer-should-continue?
-  "True while the consumer supervisor loop should keep running.
-  Differs from p/running? by allowing :restarting status.
-  Returns false for :stopped, :failed, and :exception (halt path)."
-  [{:keys [state]}]
-  (not (contains? #{:stopped :failed :exception} (:status @state))))
+    (when (consumer-should-continue? topic)
+      (let [new-consumer (create-consumer-fn)]
+        (swap! (:state topic) assoc :kafka-consumer new-consumer :status :running)
+        new-consumer))))
 
 ;; Write last offset to state, check last offset before
 ;; pushing event to queue--should cover case were poll fails with
