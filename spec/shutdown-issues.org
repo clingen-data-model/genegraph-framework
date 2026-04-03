@@ -1,0 +1,139 @@
+* Clean Shutdown Issues
+
+** Overview
+
+The framework has no mechanism to exit cleanly when a termination signal
+(SIGTERM) is received. The issues range from a missing JVM shutdown hook to
+individual component stop implementations that don't wait for threads to finish.
+
+** Issue 1: No JVM Shutdown Hook (Critical)
+
+There is no ~Runtime.getRuntime().addShutdownHook(...)~ registered anywhere in
+the codebase. On SIGTERM, the JVM calls shutdown hooks and then waits for all
+non-daemon threads to finish before exiting.
+
+Without a hook that calls ~p/stop~ on the app:
+
+- All platform threads (processor loops, consumer loops, status queue monitors)
+  run infinite ~while~ loops that check a state atom for ~:stopped~
+- Nothing ever sets the state to ~:stopped~
+- The JVM waits indefinitely for those threads; the OS eventually sends SIGKILL
+
+The fix is to register a shutdown hook in ~p/start~ (or wherever the app is
+started by client code) that calls ~p/stop~ on the app.
+
+** Issue 2: Worker Threads Not Joined After Stop
+
+~p/stop~ on ~Processor~, ~KafkaConsumerGroupTopic~, ~KafkaReaderTopic~, and the
+status queue monitor (~kafka.clj:128~) sets a state atom and returns immediately.
+The actual platform threads are never joined.
+
+This matters in ~App.stop~ (~app.clj:66~):
+
+#+begin_src clojure
+(run! #(when (satisfies? p/Lifecycle %) (p/stop %))
+      (concat (vals http-servers)
+              (non-system-processors processors)
+              (vals storage)        ; ← closed here
+              (vals topics)))
+#+end_src
+
+Storage backends (RocksDB, Jena TDB2) are closed while processor threads may
+still be mid-event, writing to storage. The stop call returns before threads
+actually exit, so shutdown proceeds with live threads still using closed
+resources.
+
+The fix is to join worker threads in ~p/stop~, or at minimum to expose a
+draining mechanism that waits for in-flight events to complete before closing
+storage.
+
+** Issue 3: Kafka Consumer Not Closed on Stop
+
+~perform-common-shutdown-actions!~ (~kafka.clj:369~) only sets state:
+
+#+begin_src clojure
+(defn perform-common-shutdown-actions! [{:keys [state] :as topic}]
+  (swap! state assoc :status :stopping)
+  (stop-producer! topic)
+  (swap! state assoc :status :stopped))
+#+end_src
+
+It never calls ~.close()~ or ~.wakeup()~ on the ~KafkaConsumer~. The consumer
+thread may be blocked inside ~.poll()~ (500 ms duration). Calling
+~KafkaConsumer.wakeup()~ would interrupt the blocking poll immediately, allowing
+the thread to check its stop condition and exit. Without it:
+
+- The thread waits out the full poll timeout on each iteration before seeing the
+  stop signal
+- The Kafka consumer connection is never explicitly closed, leaking broker
+  connections until the JVM exits
+
+** Issue 4: ~GenegraphKafkaProducer.stop~ Closes Producer Before Publish Thread Exits
+
+#+begin_src clojure
+;; kafka.clj:960
+(stop [this]
+  (.close (:producer @state))           ; closes KafkaProducer immediately
+  (swap! state assoc :status :stopped)) ; publish thread exits on next 500ms poll
+#+end_src
+
+The publish thread loops on ~(while (running? producer) ...)~ and polls its
+queue with a 500 ms timeout. After ~:status~ is set to ~:stopped~ the thread
+exits on its next iteration — but ~.close~ is called before that. If the thread
+is mid-~send-record~ when the producer is closed, it will throw an exception.
+
+The fix is to interrupt or join the publish thread before closing the underlying
+~KafkaProducer~.
+
+** Issue 5: ~App.stop~ Stops Storage Before Topics
+
+#+begin_src clojure
+;; app.clj:67
+(run! #(when (satisfies? p/Lifecycle %) (p/stop %))
+      (concat (vals http-servers)
+              (non-system-processors processors)
+              (vals storage)   ; ← storage closed here
+              (vals topics)))  ; ← Kafka consumers still running here
+#+end_src
+
+Kafka consumers continue delivering events to their queues after storage is
+closed. Combined with issue 2 (no thread joining), processor threads may still
+be reading from those queues and writing to the now-closed storage.
+
+The correct shutdown order should be:
+  http-servers → topics (stop Kafka consumers) → processors → storage → system-processor
+
+** Issue 6: Unbounded Producer Restart Loop Ignores Stop Signal
+
+~attempt-restart!~ (~kafka.clj:884~) retries forever for non-fatal exceptions:
+
+#+begin_src clojure
+(defn attempt-restart! [genegraph-producer]
+  (loop []
+    ...
+    (Thread/sleep jitter-interval)  ; does not check stop flag
+    (let [outcome ...]
+      (case outcome
+        :success nil
+        :halt-application (swap! state assoc :status :failed)
+        (recur)))))  ; retries indefinitely
+#+end_src
+
+The loop does not check whether the producer (or the app) has been asked to
+stop. If a non-fatal Kafka error occurs during shutdown, the restart loop will
+spin indefinitely, blocking clean exit. Compare with ~consumer-restart-action~,
+which caps consumer restarts at 50 within 60 seconds.
+
+The fix is to check ~(running? producer)~ (or a stop flag) in the restart loop
+before sleeping and before recurring.
+
+** Summary Table
+
+| Issue                                           | Severity | Location                        |
+|-------------------------------------------------+----------+---------------------------------|
+| No JVM shutdown hook                            | Critical | (none — missing entirely)       |
+| Worker threads not joined after stop            | High     | ~app.clj:66~, all ~stop~ impls  |
+| Kafka consumer not closed/woken on stop         | High     | ~kafka.clj:369~                 |
+| Producer closed before publish thread exits     | Medium   | ~kafka.clj:960~                 |
+| Storage closed before topics in ~App.stop~      | Medium   | ~app.clj:67~                    |
+| Unbounded producer restart loop ignores stop    | Medium   | ~kafka.clj:884~                 |

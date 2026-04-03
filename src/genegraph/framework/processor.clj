@@ -264,12 +264,27 @@
 
 (derive Processor :genegraph/processor)
 
-(defn process-parallel-event [processor event]
-  (.put (:effect-queue processor)
-        (future
+(defn process-parallel-event [{:keys [gate-fn
+                                      state
+                                      parallel-gate-timeout
+                                      concurrent-locks
+                                      effect-queue]
+                               :as processor}
+                              event]
+  (let [result-promise (promise)]
+    (.acquire concurrent-locks)
+    (Thread/startVirtualThread
+     (fn []
+       (try
+         (deliver
+          result-promise
           (-> event
               (interceptor-chain/enqueue (:interceptors processor))
-              interceptor-chain/execute))))
+              interceptor-chain/execute))
+         (catch Exception e (deliver e))
+         (finally
+           (.release concurrent-locks)))))
+    (.put (:effect-queue processor) result-promise)))
 
 (defn await-prior-event [{:keys [gate-fn state parallel-gate-timeout] :as processor} event]
   (let [k (gate-fn (::event/data event))
@@ -284,20 +299,51 @@
                       {:key k
                        :cause :timeout-exceeded})))))
 
-(defn process-gated-parallel-event [{:keys [gate-fn state parallel-gate-timeout] :as processor} event]
+(defn process-gated-parallel-event [{:keys [gate-fn
+                                            state
+                                            parallel-gate-timeout
+                                            concurrent-locks
+                                            effect-queue]
+                                     :as processor}
+                                    event]
   (let [k (gate-fn (::event/data event))
-        gate (get (:gates @state) k)
-        timeout (or parallel-gate-timeout 30)]
-    (await-prior-event processor event)
+        prior-promise (get-in @state [:gates k])
+        result-promise (promise)]
+    (.acquire concurrent-locks)
     (swap! state assoc-in [:gates k] (::event/completion-promise event))
-    (process-parallel-event processor event)))
+    (Thread/startVirtualThread
+     (fn []
+       (try
+         (when prior-promise @prior-promise)
+         (deliver
+          result-promise
+          (-> event
+              (interceptor-chain/enqueue (:interceptors processor))
+              interceptor-chain/execute))
+         (finally
+           (.release concurrent-locks)
+           (swap! state update :gates dissoc k)))))
+    (.put effect-queue result-promise)))
 
-(defn deserialize-parallel-event [processor event]
-  (.put (:deserialized-event-queue processor)
-        (future
+(defn deserialize-parallel-event [{:keys [concurrent-locks deserialized-event-queue]
+                                   :as processor}
+                                  event]
+  (let [result-promise (promise)]
+    (.put deserialized-event-queue result-promise)
+    (.acquire concurrent-locks)
+    (Thread/startVirtualThread
+     (fn []
+       (try
+         (deliver
+          result-promise
           (-> (add-app-state event processor)
               event/deserialize
-              (update ::event/completion-promise #(or % (promise)))))))
+              (update ::event/completion-promise #(or % (promise)))))
+         (catch Exception e
+           (log/error :fn ::deserialize-parallel-event
+                      :processor (:name processor))
+           (deliver result-promise e))
+         (finally (.release concurrent-locks)))))))
 
 (defrecord ParallelProcessor [name
                               subscribe
@@ -310,7 +356,9 @@
                               deserialized-event-queue
                               effect-queue
                               gate-fn
-                              init-fn]
+                              init-fn
+                              queue-size
+                              concurrent-locks]
 
   p/EventProcessor
   (process [this event] (process-event this event))
@@ -374,8 +422,10 @@
 (derive ParallelProcessor :genegraph/processor)
 
 (defmethod p/init :parallel-processor [processor-def]
-  (-> processor-def
-      processor-init
-      (assoc :effect-queue (ArrayBlockingQueue. 30))
-      (assoc :deserialized-event-queue (ArrayBlockingQueue. 30))
-      map->ParallelProcessor))
+  (let [queue-size (:queue-size processor-def 50)]
+    (-> processor-def
+        processor-init
+        (assoc :effect-queue (ArrayBlockingQueue. queue-size))
+        (assoc :deserialized-event-queue (ArrayBlockingQueue. queue-size))
+        (assoc :concurrent-locks (Semaphore. queue-size true))
+        map->ParallelProcessor)))

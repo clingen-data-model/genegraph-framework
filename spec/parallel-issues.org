@@ -1,0 +1,81 @@
+* ParallelProcessor Performance Issues
+
+** Overview
+
+The ~ParallelProcessor~ is unexpectedly slow due to several structural issues in
+~src/genegraph/framework/processor.clj~. The design intends a 3-stage pipeline
+(deserialize → process → effects), but the implementation collapses throughput
+in several ways.
+
+** Issue 1: Thread 3 Serializes Both Processing Wait and Effects
+
+Thread 3 is supposed to handle only effects, but it actually does two things
+serially:
+
+#+begin_src clojure
+;; Thread 3 (line 352-355)
+(when-let [event-future (.poll effect-queue 500 TimeUnit/MILLISECONDS)]
+  (process-event-effects! @event-future))  ; blocks until interceptor chain done
+#+end_src
+
+~@event-future~ blocks Thread 3 until the full interceptor chain completes in
+the ForkJoinPool. Then Thread 3 runs effects. Interceptor chains do run in
+parallel across ForkJoinPool threads, but effects are completely sequential —
+event N+1's effects cannot start until event N's interceptor chain *and* effects
+are both finished.
+
+This is the core throughput ceiling.
+
+** Issue 2: ~gate-fn~ Blocks Thread 2 (the Dispatch Thread)
+
+~await-prior-event~ (line 274) blocks Thread 2 until the completion-promise for
+the prior same-key event is delivered. That promise is only delivered *after*
+effects complete (via ~deliver-completion-promise~ → virtual thread). So when
+using ~gate-fn~, Thread 2 stalls for the full duration of:
+
+  interceptor chain + effects + virtual thread delivery overhead
+
+During that wait, no new events can be submitted from the
+~deserialized-event-queue~, eliminating pipeline parallelism entirely for
+same-key bursts.
+
+** Issue 3: ~(:gates @state)~ Is Never Cleaned Up
+
+#+begin_src clojure
+;; line 292 — only ever adds, never removes
+(swap! state assoc-in [:gates k] (::event/completion-promise event))
+#+end_src
+
+Every unique key produced by ~gate-fn~ accumulates in the state atom forever.
+For a long-running processor with many distinct keys this is a memory leak.
+
+** Issue 4: Queue Capacity of 30 Creates Rapid Backpressure
+
+Both queues are initialized with ~ArrayBlockingQueue. 30~ (lines 378–380). The
+~.put~ calls in ~deserialize-parallel-event~ (line 296) and
+~process-parallel-event~ (line 269) are blocking. If Thread 3 falls behind:
+
+  ~effect-queue~ fills → blocks Thread 2 → blocks Thread 1
+
+The effective parallelism collapses to 1 at that point.
+
+** Summary Table
+
+| Issue                                          | Impact                                      |
+|------------------------------------------------+---------------------------------------------|
+| Thread 3 waits on interceptor chain + effects  | Core throughput ceiling                     |
+| ~await-prior-event~ blocks Thread 2 (gate-fn) | Serializes all processing on key collisions |
+| Gates never pruned from state atom             | Unbounded memory growth                     |
+| Queue size = 30                                | Fast backpressure, collapses pipeline       |
+
+** Suggested Fix Direction
+
+The highest-impact change would be to decouple "waiting for processing" from
+"running effects" in Thread 3. Instead of Thread 3 blocking on ~@event-future~,
+the processing future itself should enqueue a ready-to-run effects thunk when it
+completes (e.g., via a callback or by putting the realized event directly on a
+second queue). Thread 3 would then only ever run effects on already-completed
+events, never block on interceptor chain completion.
+
+Gate cleanup could be added by removing the key from ~:gates~ after the
+completion-promise is delivered.
