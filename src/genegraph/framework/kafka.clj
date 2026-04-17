@@ -621,9 +621,7 @@
                       (->> (poll-kafka-consumer
                             consumer
                             {::event/format (:serialization this)})
-                           (map #(assoc %
-                                        ::event/topic name
-                                        ::event/skip-publish-effects true))
+                           (map #(assoc % ::event/topic name))
                            (run! #(deliver-event this %)))
                       (Thread/sleep 100))
                     (.unsubscribe consumer)
