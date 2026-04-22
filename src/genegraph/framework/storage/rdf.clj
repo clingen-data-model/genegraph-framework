@@ -16,9 +16,11 @@
            [org.apache.jena.rdf.model Model Resource ModelFactory
             ResourceFactory Statement Property]
            [org.apache.jena.tdb2 TDB2Factory DatabaseMgr]
-           [org.apache.jena.query ReadWrite Query QueryFactory QueryExecutionFactory Dataset
-            QuerySolutionMap]
+           [org.apache.jena.query ReadWrite Query QueryFactory
+            QueryExecutionFactory Dataset QuerySolutionMap]
            [org.apache.jena.sparql.algebra OpAsQuery]
+           [org.apache.jena.shacl ShaclValidator ValidationReport]
+           [org.apache.jena.shacl.validation ReportEntry]
            [org.apache.jena.riot RDFDataMgr Lang]
            [java.util.zip GZIPInputStream]
            [org.apache.commons.io FileUtils]))
@@ -276,6 +278,36 @@
             (get jena-rdf-format (::event/format event)))
     (assoc event ::event/value (.toString os))))
 
+(defn model->shapes [m]
+  (.parse (ShaclValidator/get)
+          (.getGraph m)))
+
+(defn conforms? [m shapes]
+  (.conforms (ShaclValidator/get) shapes (.getGraph m)))
+
+(defn- report-entry->m [re]
+  (let [source (.source re)]
+    {:constraint (if-not (.isBlank source) (->kw source) ::blank)
+     :message (.message re)
+     :target (str (.focusNode re))
+     :severity (-> re .severity .level ->kw)}))
+
+(defn validate [m shapes]
+  (let [rpt (.validate (ShaclValidator/get) shapes (.getGraph m))]
+    {:conforms? (.conforms rpt)
+     :entries (mapv report-entry->m (.getEntries rpt))}))
+
+(comment
+  (let [shapes-p (str "/users/tristan/code/genegraph-gene-validity-sepio/"
+                      "resources/gene_validity_shacl.ttl")
+        model-p (str "/Users/tristan/data/genegraph-public/latest-nt/"
+                     "gg_a0a9ec11-ef90-4095-9c9e-696eabd0395bv3.1.nt")]
+    (with-open [is (io/input-stream shapes-p)
+                is-m (io/input-stream model-p)]
+      (validate
+       (read-rdf is-m ::n-triples)
+       (model->shapes (read-rdf is ::turtle))))))
+
 (comment
   (-> {::event/format ::turtle
        ::event/value (slurp "/users/tristan/data/genegraph-neo/base/dcterms.ttl")}
@@ -297,7 +329,7 @@
       '[:bgp [c :rdf/type :rdfs/Class]]]))
   (def m
     (-> {::event/format ::turtle
-        ::event/value (slurp "/users/tristan/data/genegraph-neo/base/dcterms.ttl")}
+         ::event/value (slurp "/users/tristan/data/genegraph-neo/base/dcterms.ttl")}
         event/deserialize
         ::event/data))
 

@@ -13,6 +13,7 @@
             Model
             ModelFactory
             RDFNode]
+           [org.apache.jena.graph Node]
            [java.io
             ByteArrayOutputStream
             ByteArrayInputStream]
@@ -68,6 +69,11 @@
 
 (def type-property
   (ResourceFactory/createProperty "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"))
+
+(extend-type Node
+
+  AsKeyword
+  (->kw [this] (names/iri->kw (str this))))
 
 (extend-type Resource
   ThreadableData
