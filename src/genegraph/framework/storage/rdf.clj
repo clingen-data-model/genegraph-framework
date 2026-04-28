@@ -318,21 +318,21 @@
     (resource v)))
 
 (defn edn->statements
-  ([m] (map->statements m []))
+  ([m] (edn->statements m []))
   ([m statements]
    (let [iri (:iri m)]
      (reduce
       (fn [a [k v]]
         (cond
           (is-literal? k) (conj a [iri k v])
-          (map? v) (map->statements
+          (map? v) (edn->statements
                     v
                     (conj a [iri k (value->rdf-object v)]))
           (vector? v) (reduce
                        (fn [a1 v1]
                          (let [a2 (conj a1 [iri k (value->rdf-object v1)])]
                            (if (map? v1)
-                             (map->statements v1 a2)
+                             (edn->statements v1 a2)
                              a2)))
                        a
                        v)
