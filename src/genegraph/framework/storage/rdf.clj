@@ -11,6 +11,7 @@
             [genegraph.framework.storage :as storage]
             [clojure.string :as string]
             [clojure.java.io :as io]
+            [clojure.set :as set]
             [io.pedestal.log :as log])
   (:import [java.io ByteArrayOutputStream ByteArrayInputStream]
            [org.apache.jena.rdf.model Model Resource ModelFactory
@@ -296,6 +297,62 @@
   (let [rpt (.validate (ShaclValidator/get) shapes (.getGraph m))]
     {:conforms? (.conforms rpt)
      :entries (mapv report-entry->m (.getEntries rpt))}))
+
+(defonce literal-attrs (atom #{}))
+
+(defn add-literal-attrs [attrs]
+  (swap! literal-attrs set/union (set attrs)))
+
+(defn add-prefixes [prefixes]
+  (names/add-prefixes prefixes))
+
+(defn add-keyword-mappings [kw-mappings]
+  (names/add-keyword-mappings))
+
+(defn is-literal? [attr]
+  (get @literal-attrs attr))
+
+(defn value->rdf-object [v]
+  (if (map? v)
+    (resource (:iri v))
+    (resource v)))
+
+(defn edn->statements
+  ([m] (map->statements m []))
+  ([m statements]
+   (let [iri (:iri m)]
+     (reduce
+      (fn [a [k v]]
+        (cond
+          (is-literal? k) (conj a [iri k v])
+          (map? v) (map->statements
+                    v
+                    (conj a [iri k (value->rdf-object v)]))
+          (vector? v) (reduce
+                       (fn [a1 v1]
+                         (let [a2 (conj a1 [iri k (value->rdf-object v1)])]
+                           (if (map? v1)
+                             (map->statements v1 a2)
+                             a2)))
+                       a
+                       v)
+          :default (conj a [iri k (value->rdf-object v)])))
+      statements
+      (remove
+       (fn [[_ v]] (nil? v))
+       (set/rename-keys (dissoc m :iri)
+                        {:type :rdf/type}))))))
+
+(defn edn->model [m]
+  (statements->model (edn->statements m)))
+
+(defn edn->text-index [m source]
+  {:iri (:iri m)
+   :labels (if (:rdfs/label m)
+             [(:rdfs/label m)]
+             [])
+   :types [(-> m :type resource str)]
+   :source source})
 
 (comment
   (let [shapes-p (str "/users/tristan/code/genegraph-gene-validity-sepio/"
