@@ -281,7 +281,7 @@
           (-> event
               (interceptor-chain/enqueue (:interceptors processor))
               interceptor-chain/execute))
-         (catch Exception e (deliver e))
+         (catch Exception e (deliver result-promise e))
          (finally
            (.release concurrent-locks)))))
     (.put (:effect-queue processor) result-promise)))
@@ -322,6 +322,11 @@
               interceptor-chain/execute))
          (finally
            (.release concurrent-locks)
+           (swap! state update :gates 
+                  (fn [g] 
+                    (if (= (get g k) (::event/completion-promise event))
+                      (dissoc g k)
+                      g)))
            (swap! state update :gates dissoc k)))))
     (.put effect-queue result-promise)))
 
@@ -396,16 +401,17 @@
       (.start
        (Thread.
         #(while (p/running? this)
-           (try 
-             (when-let [event-future (.poll effect-queue
-                                            500
-                                            TimeUnit/MILLISECONDS)]
-               (process-event-effects! @event-future))
-             ;; Claude has identified this as an issue. All exceptions thrown
-             ;; by processing messages will end up here, and it offers very little
-             ;; information on what's the issue with the application
-             (catch Exception e
-               (log/error :source ::start :record ::ParallelProcessor))))))))
+           (when-let [event-future (.poll effect-queue
+                                          500
+                                          TimeUnit/MILLISECONDS)]
+             (try
+               (process-event-effects! @event-future)
+               (catch Exception e
+                 (deliver (::event/completion-promise @event-future) false)
+                 (log/error :source ::start
+                            :record ::ParallelProcessor
+                            :name name
+                            :error "Error processing event effects")))))))))
   
   (stop [this]
     (swap! state assoc :status :stopped)
