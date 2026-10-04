@@ -3,6 +3,7 @@
             [genegraph.framework.protocol :as p]
             [genegraph.framework.event :as event]
             [io.pedestal.interceptor :as interceptor]
+            [io.pedestal.service.resources :as pedestal-resources]
             #_[io.pedestal.http :as http]
             [io.pedestal.log :as log]))
 
@@ -43,6 +44,9 @@
      ["/live"
       :get (fn [_] {:status 200 :body "server is live"})
       :route-name ::liveness]]
+    :route-fragments (pedestal-resources/resource-routes
+                      {:resource-root "genegraph"
+                       :prefix "/assets"})
     :port 8888}})
 
 (def publish-system-event-interceptor
@@ -76,8 +80,7 @@
             print-event-interceptor)
     :ready-api
     {:type :processor
-     :name :ready-api
-     }}})
+     :name :ready-api}}})
 
 
 (comment

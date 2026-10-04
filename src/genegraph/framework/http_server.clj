@@ -40,23 +40,20 @@
 
 (def base-interceptors
   [service-interceptors/log-request
-   service-interceptors/not-found
-   #_ring-interceptors/content-type
-   #_route-interceptors/query-params
-   #_body-interceptors/body-params])
+   service-interceptors/not-found])
 
-(defn create-connector [server-def]
-  (-> default-connector-map
-      #_(assoc :interceptors base-interceptors)
-      (conn/with-interceptors base-interceptors)
-      #_(conn/with-default-interceptors)
-      (merge (select-keys server-def
-                          [:port :host :interceptors]))
-      (conn/with-routes (->> (:endpoints server-def)
-                             (map endpoint->route)
-                             (concat (:routes server-def))
-                             set))
-      (hk/create-connector nil)))
+(defn create-connector [{:keys [endpoints routes route-fragments] :as server-def}]
+  (let [base-connector (-> default-connector-map
+                           (conn/with-interceptors base-interceptors)
+                           (merge (select-keys server-def
+                                               [:port :host :interceptors])))
+        route-set (->> (:endpoints server-def)
+                       (map endpoint->route)
+                       (concat (:routes server-def))
+                       set)]
+    (if route-fragments
+      (hk/create-connector (conn/with-routes base-connector route-set route-fragments) nil)
+      (hk/create-connector (conn/with-routes base-connector route-set) nil))))
 
 (defmethod p/init :http-server [server-def]
   (-> server-def
@@ -64,8 +61,3 @@
       (assoc :connector (create-connector server-def))
       map->Server))
 
-
-#_(map :name
-     (-> default-connector-map
-         conn/with-default-interceptors
-         :interceptors))
