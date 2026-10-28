@@ -303,13 +303,13 @@
    "key.deserializer"   "org.apache.kafka.common.serialization.StringDeserializer"
    "value.deserializer" "org.apache.kafka.common.serialization.StringDeserializer"})
 
-(defn- make-mock-consumer []
+(defn- make-mock-consumer [& {:keys [on-close]}]
   (proxy [KafkaConsumer] [mock-consumer-props]
     (subscribe
       ([topics]          nil)
       ([topics listener] nil))
     (unsubscribe [] nil)
-    (close [] nil)))
+    (close [] (when on-close (on-close)) nil)))
 
 ;; ---------------------------------------------------------------------------
 ;; Topic builders for supervisor loop integration tests
@@ -454,7 +454,7 @@
 
 (defn- make-restartable-topic [& {:as extra-state}]
   {:name  :test-restartable
-   :state (atom (merge (kafka/initial-state) extra-state))})
+   :state (atom (merge (kafka/initial-state) {:status :running} extra-state))})
 
 (deftest attempt-consumer-restart-state-test
   (testing "happy path: state is updated correctly"
@@ -485,7 +485,25 @@
       (let [ev (p/poll sys-topic)]
         (is (some? ev))
         (is (= :kafka-consumer-restart (get-in ev [::event/data :type])))
-        (is (= 1 (get-in ev [::event/data :restarts])))))))
+        (is (= 1 (get-in ev [::event/data :restarts]))))))
+
+  (testing "already stopped — no consumer is created and status stays :stopped"
+    (let [topic   (make-restartable-topic :status :stopped)
+          created (atom 0)]
+      (is (nil? (kafka/attempt-consumer-restart! topic #(swap! created inc))))
+      (is (= 0 @created))
+      (is (= :stopped (:status @(:state topic))))))
+
+  (testing "stopped while creating — new consumer is closed and stop is not overridden"
+    (let [topic  (make-restartable-topic)
+          closed (atom 0)]
+      (is (nil? (kafka/attempt-consumer-restart!
+                 topic
+                 (fn []
+                   (swap! (:state topic) assoc :status :stopped)
+                   (make-mock-consumer :on-close #(swap! closed inc))))))
+      (is (= 1 @closed))
+      (is (= :stopped (:status @(:state topic)))))))
 
 ;; ===========================================================================
 ;; Section 5 — Supervisor loop integration tests
@@ -498,16 +516,20 @@
 
 (deftest cg-topic-clean-stop-test
   (testing "supervisor loop exits cleanly on p/stop — no restarts"
-    (let [topic (make-cg-topic)]
+    (let [topic  (make-cg-topic)
+          closed (atom 0)]
       (deliver-cg-offsets! topic)
-      (with-redefs [kafka/create-kafka-consumer (fn [_] (make-mock-consumer))
+      (with-redefs [kafka/create-kafka-consumer (fn [_]
+                                                  (make-mock-consumer
+                                                   :on-close #(swap! closed inc)))
                     kafka/update-local-storage! (fn [_] [])
                     kafka/poll-kafka-consumer   (fn [_ _] [])]
         (p/start topic)
         (Thread/sleep 100)
         (p/stop topic)
         (is (wait-for #(= :stopped (:status @(:state topic))) 2000))
-        (is (= 0 (:restarts @(:state topic))))))))
+        (is (= 0 (:restarts @(:state topic))))
+        (is (wait-for #(= 1 @closed) 2000) "consumer is closed on stop")))))
 
 (deftest cg-topic-restart-on-recoverable-exception-test
   (testing "supervisor loop restarts consumer on ApplicationRecoverableException"
@@ -561,16 +583,20 @@
 
 (deftest reader-topic-clean-stop-test
   (testing "reader supervisor loop exits cleanly on p/stop — no restarts"
-    (let [topic (make-reader-topic)]
+    (let [topic  (make-reader-topic)
+          closed (atom 0)]
       (deliver-reader-offsets! topic)
-      (with-redefs [kafka/create-local-kafka-consumer (fn [_ _] (make-mock-consumer))
+      (with-redefs [kafka/create-local-kafka-consumer (fn [_ _]
+                                                        (make-mock-consumer
+                                                         :on-close #(swap! closed inc)))
                     kafka/end-offset                  (fn [_] 0)
                     kafka/poll-kafka-consumer         (fn [_ _] [])]
         (p/start topic)
         (Thread/sleep 100)
         (p/stop topic)
         (is (wait-for #(= :stopped (:status @(:state topic))) 2000))
-        (is (= 0 (:restarts @(:state topic))))))))
+        (is (= 0 (:restarts @(:state topic))))
+        (is (wait-for #(= 1 @closed) 2000) "consumer is closed on stop")))))
 
 (deftest reader-topic-restart-on-recoverable-exception-test
   (testing "reader supervisor loop restarts consumer on ApplicationRecoverableException"
@@ -614,3 +640,49 @@
         ;; Both calls should use last-delivered-event-offset (42), not initial-local-offset (0).
         (is (every? #(= 42 %) @create-calls)
             "all create-local-kafka-consumer calls should use last-delivered-event-offset")))))
+
+(deftest reader-topic-restart-creates-single-consumer-test
+  (testing "restart reuses the consumer it created instead of creating another"
+    (let [topic        (make-reader-topic)
+          create-count (atom 0)
+          poll-count   (atom 0)]
+      (deliver-reader-offsets! topic)
+      (with-redefs [kafka/create-local-kafka-consumer (fn [_ _]
+                                                        (swap! create-count inc)
+                                                        (make-mock-consumer))
+                    kafka/end-offset                  (fn [_] 0)
+                    kafka/poll-kafka-consumer         (fn [_ _]
+                                                        (when (= 1 (swap! poll-count inc))
+                                                          (throw (proxy [ApplicationRecoverableException]
+                                                                        ["transient"])))
+                                                        [])]
+        (p/start topic)
+        ;; Polling resumes only once the restarted consumer is in use.
+        (is (wait-for #(>= @poll-count 3) 3000))
+        (p/stop topic)
+        (is (wait-for #(= :stopped (:status @(:state topic))) 2000))
+        (is (= 2 @create-count)
+            "one consumer at start, one from the restart")))))
+
+(deftest reader-topic-stop-during-restart-test
+  (testing "p/stop during a restart is not overridden by the restart"
+    (let [topic        (make-reader-topic)
+          create-count (atom 0)
+          closed       (atom 0)]
+      (deliver-reader-offsets! topic)
+      (with-redefs [kafka/create-local-kafka-consumer (fn [_ _]
+                                                        (when (= 2 (swap! create-count inc))
+                                                          ;; stop lands while the restart creates its consumer
+                                                          (p/stop topic))
+                                                        (make-mock-consumer :on-close #(swap! closed inc)))
+                    kafka/end-offset                  (fn [_] 0)
+                    kafka/poll-kafka-consumer         (fn [_ _]
+                                                        (throw (proxy [ApplicationRecoverableException]
+                                                                      ["transient"])))]
+        (p/start topic)
+        (is (wait-for #(= 2 @create-count) 3000))
+        ;; Allow time for the supervisor loop to (incorrectly) resurrect.
+        (Thread/sleep 500)
+        (is (= :stopped (:status @(:state topic))))
+        (is (= 2 @create-count) "no consumer created after stop")
+        (is (= 2 @closed) "both the failed and the discarded consumer are closed")))))

@@ -404,16 +404,29 @@
                             :restart-count   (:restarts @(:state topic))})
     action))
 
+(def ^:private terminal-statuses #{:stopped :failed :exception})
+
 (defn consumer-should-continue?
   "True while the consumer supervisor loop should keep running.
   Differs from p/running? by allowing :restarting status.
   Returns false for :stopped, :failed, and :exception (halt path)."
   [{:keys [state]}]
-  (not (contains? #{:stopped :failed :exception} (:status @state))))
+  (not (contains? terminal-statuses (:status @state))))
+
+(defn close-consumer!
+  "Close consumer, logging rather than throwing on failure."
+  [topic consumer]
+  (try (.close consumer)
+       (catch Exception _
+         (log/info :fn ::close-consumer!
+                   :name (:name topic)
+                   :msg "Could not close existing consumer."))))
 
 (defn attempt-consumer-restart!
   "Close old consumer, wait with exponential backoff, create and return a new consumer.
-  Updates :restarts and :restart-timestamps in state. Throws if creation fails."
+  Updates :restarts and :restart-timestamps in state. Throws if creation fails.
+  Returns nil without creating (or keeping) a consumer if the topic is stopped
+  before or during the restart; a stop is never overridden by the restart."
   [topic create-consumer-fn]
   (let [{:keys [restarts kafka-consumer]} @(:state topic)
         base-ms  500
@@ -421,14 +434,12 @@
         interval (long (let [b (min (* base-ms (Math/pow 2 restarts)) max-ms)]
                          (+ b (* b (Math/random) 0.2))))]
     (swap! (:state topic)
-           #(-> %
-                (update :restarts inc)
-                (update :restart-timestamps conj (System/currentTimeMillis))
-                (assoc  :status :restarting)))
-    (try (.close kafka-consumer)
-         (catch Exception _
-           (log/info :fn ::attempt-consumer-restart!
-                     :msg "Could not close existing consumer during restart.")))
+           (fn [s]
+             (cond-> (-> s
+                         (update :restarts inc)
+                         (update :restart-timestamps conj (System/currentTimeMillis)))
+               (not (terminal-statuses (:status s))) (assoc :status :restarting))))
+    (close-consumer! topic kafka-consumer)
     (log/info :fn ::attempt-consumer-restart!
               :name (:name topic)
               :restarts (inc restarts)
@@ -439,9 +450,15 @@
                             :restarts  (inc restarts)})
     (Thread/sleep interval)
     (when (consumer-should-continue? topic)
-      (let [new-consumer (create-consumer-fn)]
-        (swap! (:state topic) assoc :kafka-consumer new-consumer :status :running)
-        new-consumer))))
+      (let [new-consumer (create-consumer-fn)
+            [old-state _] (swap-vals! (:state topic)
+                                      #(if (= :restarting (:status %))
+                                         (assoc % :kafka-consumer new-consumer :status :running)
+                                         %))]
+        (if (= :restarting (:status old-state))
+          new-consumer
+          (do (close-consumer! topic new-consumer)
+              nil))))))
 
 ;; Write last offset to state, check last offset before
 ;; pushing event to queue--should cover case were poll fails with
@@ -468,9 +485,10 @@
       (.start
        (Thread.
         (fn []
-          (loop []
+          (loop [restarted-consumer nil]
             (when (consumer-should-continue? this)
-              (let [^KafkaConsumer new-consumer (create-kafka-consumer this)]
+              (let [^KafkaConsumer new-consumer (or restarted-consumer
+                                                    (create-kafka-consumer this))]
                 (swap! state assoc :kafka-consumer new-consumer)
                 (let [action
                       (try
@@ -493,16 +511,20 @@
                         (catch Exception e
                           (handle-consumer-exception! this e)))]
                   (case action
-                    nil     (swap! state assoc :status :stopped)
-                    :retry  (do (Thread/sleep 1000) (recur))
+                    nil     (do (close-consumer! this new-consumer)
+                                (swap! state assoc :status :stopped))
+                    :retry  (do (close-consumer! this new-consumer)
+                                (Thread/sleep 1000)
+                                (recur nil))
                     :halt   (p/exception this (ex-info "Consumer halted after exception" {}))
-                    :restart (let [ok? (try
-                                         (attempt-consumer-restart! this #(create-kafka-consumer this))
-                                         true
-                                         (catch Exception e
-                                           (p/exception this e)
-                                           false))]
-                               (when ok? (recur))))))))))))
+                    :restart (let [[ok? c] (try
+                                             [true (attempt-consumer-restart!
+                                                    this
+                                                    #(create-kafka-consumer this))]
+                                             (catch Exception e
+                                               (p/exception this e)
+                                               [false nil]))]
+                               (when ok? (recur c))))))))))))
 
     (stop [this]
       (perform-common-shutdown-actions! this))
@@ -608,11 +630,12 @@
     (.start
      (Thread.
       (fn []
-        (loop []
+        (loop [restarted-consumer nil]
           (when (consumer-should-continue? this)
             (let [start-offset (or (:last-delivered-event-offset @state)
                                    @(:initial-local-offset @state))
-                  ^KafkaConsumer consumer (create-local-kafka-consumer this start-offset)
+                  ^KafkaConsumer consumer (or restarted-consumer
+                                              (create-local-kafka-consumer this start-offset))
                   action
                   (try
                     (swap! state assoc :kafka-consumer consumer)
@@ -629,21 +652,23 @@
                     (catch Exception e
                       (handle-consumer-exception! this e)))]
               (case action
-                nil     (swap! state assoc :status :stopped)
-                :retry  (do (Thread/sleep 1000) (recur))
+                nil     (do (close-consumer! this consumer)
+                            (swap! state assoc :status :stopped))
+                :retry  (do (close-consumer! this consumer)
+                            (Thread/sleep 1000)
+                            (recur nil))
                 :halt   (p/exception this (ex-info "Consumer halted after exception" {}))
-                :restart (let [ok? (try
-                                     (attempt-consumer-restart!
-                                      this
-                                      #(create-local-kafka-consumer
-                                        this
-                                        (or (:last-delivered-event-offset @state)
-                                            @(:initial-local-offset @state))))
-                                     true
-                                     (catch Exception e
-                                       (p/exception this e)
-                                       false))]
-                           (when ok? (recur)))))))))))
+                :restart (let [[ok? c] (try
+                                         [true (attempt-consumer-restart!
+                                                this
+                                                #(create-local-kafka-consumer
+                                                  this
+                                                  (or (:last-delivered-event-offset @state)
+                                                      @(:initial-local-offset @state))))]
+                                         (catch Exception e
+                                           (p/exception this e)
+                                           [false nil]))]
+                           (when ok? (recur c)))))))))))
 
   ;; Currently does nothing. May want to create an option to reset
   ;; local state store (when not destroying it at the same time
