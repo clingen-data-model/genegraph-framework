@@ -1,12 +1,12 @@
 (ns genegraph.framework.storage.rdf.jsonld
   (:require [clojure.java.io :as io]
             [charred.api :as json])
-  (:import [org.apache.jena.riot.system JenaTitanium]
+  (:import [org.apache.jena.riot.system.jsonld JenaToTitanium]
            [org.apache.jena.riot RDFDataMgr Lang]
            [org.apache.jena.rdf.model Model Statement ModelFactory]
            [org.apache.jena.query Dataset DatasetFactory]
            [org.apache.jena.sparql.core DatasetGraph]
-           [com.apicatalog.jsonld JsonLd]
+           [com.apicatalog.jsonld JsonLd JsonLdOptions]
            [com.apicatalog.jsonld.serialization RdfToJsonld]
            [com.apicatalog.jsonld.document Document RdfDocument JsonDocument]
            [com.apicatalog.jsonld.lang Keywords]
@@ -21,11 +21,8 @@
   (-> (.asDatasetGraph
        (doto (DatasetFactory/create)
          (.addNamedModel "http://example/" model)))
-      JenaTitanium/convert
-      RdfDocument/of
-      JsonLd/fromRdf
-      .nativeTypes
-      .get))
+      (JenaToTitanium/convert (doto (JsonLdOptions.)
+                                (.setUseNativeTypes true)))))
 
 (defn append-context [array context]
   (-> (Json/createObjectBuilder)
@@ -67,7 +64,7 @@
           "file:///Users/tristan/data/genegraph-neo/jsonld/library-frame.jsonld"]
       (-> (RDFDataMgr/loadModel ttl-uri Lang/TURTLE)
           (model->json-ld (json-file->doc frame-path))
-          json/read-str))
+          json/read-json))
 
 
   )
