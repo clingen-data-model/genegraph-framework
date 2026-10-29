@@ -2,6 +2,7 @@
   (:require [genegraph.framework.storage.rocksdb :as rocksdb]
             [genegraph.framework.storage :as storage]
             [genegraph.framework.protocol :as p]
+            [genegraph.framework.storage.rdf :as rdf]
             [clojure.test :refer [deftest testing is]])
   (:import [java.util Arrays]
            [com.google.common.primitives Longs]))
@@ -167,6 +168,49 @@
         (storage/write db :k :stored cp)
         @cp
         (is (= :stored (storage/read db :k)))))))
+
+;; ---------------------------------------------------------------------------
+;; Jena Model values (Nippy extension in storage.rdf.types)
+;; ---------------------------------------------------------------------------
+
+(deftest model-write-read-test
+  (testing "a Jena Model round-trips as an isomorphic model"
+    (with-db [db]
+      (let [bnode (rdf/blank-node)
+            model (rdf/statements->model
+                   [["http://example.com/a" :rdf/type :rdfs/Class]
+                    ["http://example.com/a" :rdfs/label "A thing"]
+                    ["http://example.com/a" "http://example.com/count" 42]
+                    ["http://example.com/a" "http://example.com/related" bnode]
+                    [bnode :rdfs/label "anonymous"]])]
+        (storage/write db :model model)
+        (let [result (storage/read db :model)]
+          (is (instance? org.apache.jena.rdf.model.Model result))
+          (is (= (.size model) (.size result)))
+          (is (rdf/is-isomorphic? model result))))))
+
+  (testing "a large Model round-trips intact"
+    (with-db [db]
+      (let [model (rdf/statements->model
+                   (for [i (range 20000)]
+                     [(str "http://example.com/s" i)
+                      :rdfs/label
+                      (str "label " i " " (apply str (repeat 20 "x")))]))]
+        (storage/write db :large-model model)
+        (let [result (storage/read db :large-model)]
+          (is (= (.size model) (.size result)))
+          (is (rdf/is-isomorphic? model result))))))
+
+  (testing "a Model nested in a Clojure map round-trips"
+    (with-db [db]
+      (let [model (rdf/statements->model
+                   [["http://example.com/b" :rdf/type :rdfs/Class]])
+            value {:id "b" :model model :after :sentinel}]
+        (storage/write db :wrapped value)
+        (let [result (storage/read db :wrapped)]
+          (is (= "b" (:id result)))
+          (is (= :sentinel (:after result)))
+          (is (rdf/is-isomorphic? model (:model result))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Delete

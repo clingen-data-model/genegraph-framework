@@ -172,7 +172,7 @@
  (let [model-byte-count (.readLong data-input)
        model-bytes (make-array Byte/TYPE model-byte-count)
        model (ModelFactory/createDefaultModel)]
-   (.read data-input model-bytes 0 model-byte-count)
+   (.readFully data-input model-bytes 0 model-byte-count)
    (RDFDataMgr/read model (ByteArrayInputStream. model-bytes) Lang/RDFTHRIFT)
    model))
 
